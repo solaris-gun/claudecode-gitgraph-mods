@@ -126,7 +126,10 @@ export const collect = async (
   if (!branches.some(b => b.isCurrent) && shown[0] !== undefined) {
     tips.push({ name: 'HEAD', hash: shown[0].hash })
   }
-  const owners = assignOwners(shown, tips)
+  const others = branches
+    .filter(b => b.isRemote && scope !== 'all' && b.tip !== undefined)
+    .map(b => ({ name: b.name, hash: b.tip ?? '' }))
+  const owners = assignOwners(shown, tips, others)
   const { lines: graph, colors } = layout(shown, owners)
 
   return {

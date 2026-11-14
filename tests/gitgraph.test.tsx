@@ -182,7 +182,7 @@ test('each branch keeps one color, and the legend matches it', async ($, on) => 
     expect((await ui.find({ type: 'Text', text: '━┛' }))?.props.color).toBe('success')
     expect((await ui.find({ type: 'Text', text: '●' }))?.props.color).toBe('error')
     const text = (await ui.find({ key: 'legend' }))?.text ?? ''
-    expect(text).toContain('凡例:')
+    expect(text).toContain('凡例')
     expect(text).toContain('main')
     expect(text).toContain('feature/x')
     // Local scope: the remote branch stays out of the legend.
@@ -243,6 +243,49 @@ test('a branch at the same commit as another says whose line it sits on', () => 
     name: 'origin/develop',
     on: 'develop',
   })
+})
+
+// develop fast-forwarded over guardian and verifier: their tips sit on
+// develop's line. guardian's own line is named by its `into` merge; verifier
+// has none. Each still gets a color of its own in the legend.
+const forwarded = parseLog(
+  [
+    ['d3', 'v1', 'd3', '9', 'S', 'HEAD -> develop', 'd3'],
+    ['v1', 'm2', 'v1', '8', 'S', 'verifier', 'v1'],
+    ['m2', 'm1 x1', 'm2', '7', 'S', 'guardian', '合流: なにか'],
+    ['x1', 'm1', 'x1', '6', 'S', '', 'x1'],
+    ['m1', 'd2 g2', 'm1', '5', 'S', '', '取り込み: 番人役の判定書の枝'],
+    ['g2', 'g1 d2', 'g2', '4', 'S', '', 'Merge develop into guardian'],
+    ['d2', 'd1', 'd2', '3', 'S', '', 'd2'],
+    ['g1', 'd1', 'g1', '2', 'S', '', 'g1'],
+    ['d1', '', 'd1', '1', 'S', 'main', 'd1'],
+  ]
+    .map(row => row.join(S))
+    .join('\n'),
+)
+
+test('every line in the graph has a legend row in its color', () => {
+  const tips = [
+    { name: 'main', hash: 'd1' },
+    { name: 'develop', hash: 'd3' },
+    { name: 'guardian', hash: 'm2' },
+    { name: 'verifier', hash: 'v1' },
+  ]
+  const owners = assignOwners(forwarded, tips)
+  const { lines, colors } = layout(forwarded, owners)
+  const entries = legend(forwarded, tips, owners, colors)
+  const by = (name: string) => entries.find(e => e.name === name)
+  const dot = (hash: string) =>
+    lines.find(l => l.hash === hash)?.segments.find(seg => seg.text.includes('●'))?.lane
+  // guardian's own line is named by `Merge develop into guardian`.
+  expect(by('guardian')).toMatchObject({ on: 'develop', isMerged: true, lane: dot('g2') })
+  // verifier has no line of its own: it shares develop's color.
+  expect(by('verifier')).toMatchObject({ on: 'develop', lane: dot('d3') })
+  // The x1 line no name reaches is named by the merge that took it in.
+  expect(entries.find(e => e.via === '合流: なにか')?.lane).toBe(dot('x1'))
+  // Every color drawn has a legend row.
+  const drawn = new Set(lines.flatMap(l => l.segments.flatMap(seg => (seg.lane === undefined ? [] : [seg.lane]))))
+  for (const lane of drawn) expect(entries.some(e => e.lane === lane)).toBe(true)
 })
 
 test('commitDate reads YYYY.MM.DD-hh:mm', () => {

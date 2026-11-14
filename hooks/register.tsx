@@ -15,7 +15,7 @@ const scope = atom({ plugin: 'claudecode-gitgraph-mods', key: 'scope' } as const
 const snapshot = atom(
   { plugin: 'claudecode-gitgraph-mods', key: 'snapshot' } as const,
   null as Snapshot | null,
-  { shape: 'snapshot-5' },
+  { shape: 'snapshot-6' },
 )
 const view = atom({ plugin: 'claudecode-gitgraph-mods', key: 'view' } as const, 'graph' as View, {
   shape: 'view-1',
@@ -286,20 +286,35 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
         {mode === 'graph' && snap.graph.length > 0 && (
-          <Box key="legend" flexDirection="row" flexWrap="wrap" columnGap={2}>
-            <Text dimColor>凡例:</Text>
+          <Box key="legend" flexDirection="column">
+            <Text dimColor>凡例（線の色 → ブランチ）:</Text>
             {snap.legend
               .filter(entry => shown === 'all' || !remotes.has(entry.name))
-              .map(entry => (
-                <Box flexDirection="row">
-                  <Text mono bold {...lane(entry.lane)}>
-                    ┃{' '}
-                  </Text>
-                  <Text>{entry.name}</Text>
-                  {entry.on !== undefined && <Text dimColor>（{entry.on} の線上）</Text>}
-                  {entry.isMerged === true && <Text dimColor>（合流済み）</Text>}
-                </Box>
-              ))}
+              .map(entry => {
+                const note =
+                  entry.via !== undefined
+                    ? ''
+                    : entry.on !== undefined
+                      ? entry.isMerged === true
+                        ? `（${entry.on} に合流済み）`
+                        : `（${entry.on} の線上）`
+                      : entry.isMerged === true
+                        ? '（合流済み）'
+                        : ''
+                const name =
+                  entry.via !== undefined ? `「${entry.via}」で合流した枝` : entry.name
+                return (
+                  <Box flexDirection="row">
+                    <Text mono bold {...lane(entry.lane)}>
+                      {'  '}┃{' '}
+                    </Text>
+                    <Text bold={entry.via === undefined} {...lane(entry.lane)} wrap="truncate">
+                      {fit(name, Math.max(columns - 4 - cells(note), 8))}
+                    </Text>
+                    {note !== '' && <Text dimColor>{note}</Text>}
+                  </Box>
+                )
+              })}
           </Box>
         )}
         {mode === 'graph' && snap.graph.map(line => (
@@ -315,9 +330,24 @@ export const register: Register = (on, options) => {
               </Text>
             )}
             {line.refs !== undefined && line.refs !== '' && (
-              <Text color="claude" bold>
-                ({line.refs}){' '}
-              </Text>
+              <Box key={`refs-${line.hash ?? ''}`} flexDirection="row">
+                <Text color="claude" bold>
+                  (
+                </Text>
+                {line.refs.split(', ').map((ref, i) => {
+                  const name = ref.replace(/^HEAD -> /, '')
+                  const entry = snap.legend.find(e => e.name === name)
+                  return (
+                    <Text bold {...(entry === undefined ? { color: 'claude' as ThemeKey } : lane(entry.lane))}>
+                      {i > 0 ? ', ' : ''}
+                      {ref}
+                    </Text>
+                  )
+                })}
+                <Text color="claude" bold>
+                  ){' '}
+                </Text>
+              </Box>
             )}
             {line.subject !== undefined && (
               <Text wrap="truncate">

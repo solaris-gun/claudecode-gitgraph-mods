@@ -43,6 +43,13 @@ export const mergedName = (subject: string): string | undefined =>
   /^Merge pull request #\d+ from [^/\s]+\/(\S+)/.exec(subject)?.[1] ??
   /^Merge remote-tracking branch '([^']+)'/.exec(subject)?.[1]
 
+/** The branch a merge commit's subject says it was made on: `Merge x into y` → y. */
+export const intoName = (subject: string): string | undefined =>
+  /^Merge .+ into (\S+)\s*$/.exec(subject)?.[1]
+
+/** A branch name without its remote: `origin/x` → `x`. */
+const local = (name: string): string => name.replace(/^origin\//, '')
+
 export type Owners = {
   /** Commit hash → owner index; an owner's index is its color slot. */
   of: Map<string, number>
@@ -50,19 +57,23 @@ export type Owners = {
   names: (string | undefined)[]
   /** Owner index → true when it is a merged branch found from a merge commit. */
   merged: boolean[]
+  /** Owner index → the subject of the merge commit that takes the line in. */
+  via: (string | undefined)[]
 }
 
 /**
  * Gives each commit to one branch: each tip, in order, claims its first-parent
  * chain until it meets a commit already claimed. Commits no tip claims (the
  * side of a merge whose branch is gone or merged) go to a line of their own,
- * named from the merge commit's subject where it says.
+ * named from the merge commit's subject where it says, from a branch in
+ * `others` at its newest commit, or from its own `Merge x into <branch>`.
  */
-export const assignOwners = (commits: Commit[], tips: Tip[]): Owners => {
+export const assignOwners = (commits: Commit[], tips: Tip[], others: Tip[] = []): Owners => {
   const byHash = new Map(commits.map(c => [c.hash, c]))
   const of = new Map<string, number>()
   const names: (string | undefined)[] = []
   const merged: boolean[] = []
+  const via: (string | undefined)[] = []
   const claim = (from: string, owner: number) => {
     let at: string | undefined = from
     while (at !== undefined && byHash.has(at) && !of.has(at)) {
@@ -74,23 +85,43 @@ export const assignOwners = (commits: Commit[], tips: Tip[]): Owners => {
     if (!byHash.has(tip.hash) || of.has(tip.hash)) continue
     names.push(tip.name)
     merged.push(false)
+    via.push(undefined)
     claim(tip.hash, names.length - 1)
   }
   // Name the side of each merge after the branch its subject names.
   const sideName = new Map<string, string>()
+  const mergedBy = new Map<string, string>()
   for (const c of commits) {
     const name = mergedName(c.subject)
     for (const p of c.parents.slice(1)) {
       if (name !== undefined && !sideName.has(p)) sideName.set(p, name)
+      if (!mergedBy.has(p)) mergedBy.set(p, c.subject)
     }
   }
   for (const c of commits) {
     if (of.has(c.hash)) continue
     names.push(sideName.get(c.hash))
     merged.push(true)
+    via.push(mergedBy.get(c.hash))
     claim(c.hash, names.length - 1)
   }
-  return { of, names, merged }
+  // A line still unnamed takes the name of a branch not drawn (a remote one
+  // in local scope) that points at its newest commit.
+  for (const other of others) {
+    const o = of.get(other.hash)
+    if (o !== undefined && merged[o] && names[o] === undefined) {
+      const newest = commits.find(c => of.get(c.hash) === o)
+      if (newest?.hash === other.hash) names[o] = local(other.name)
+    }
+  }
+  // A line still unnamed takes the name its own merges give it:
+  // `Merge develop into feature/x` sits on feature/x's line.
+  for (const c of commits) {
+    const o = of.get(c.hash)
+    const into = intoName(c.subject)
+    if (o !== undefined && merged[o] && names[o] === undefined && into !== undefined) names[o] = into
+  }
+  return { of, names, merged, via }
 }
 
 type Cell = { ch: string; lane?: number }
@@ -245,9 +276,11 @@ export const layout = (
 }
 
 /**
- * The legend: each branch tip shown, with its line's color. A branch whose tip
- * sits on another branch's line (merged, or at the same commit) says so; the
- * lines of merged branches that a merge subject names come after.
+ * The legend: one row per line drawn, in that line's color, so each color in
+ * the graph says which branch it is. A branch tip on another branch's line
+ * either names its own merged line (`Merge x into <branch>`) or shares that
+ * line's color (`on`). A merged line no branch name reaches is named by the
+ * subject of the merge that took it in (`via`).
  */
 export const legend = (
   commits: Commit[],
@@ -256,21 +289,47 @@ export const legend = (
   colors: number[],
 ): LegendEntry[] => {
   const shown = new Set(commits.map(c => c.hash))
+  const drawn = new Set(owners.of.values())
   const out: LegendEntry[] = []
   const seen = new Set<string>()
+  const named = new Set<number>()
+  const color = (o: number) => colors[o] ?? o
+  const lineNamed = (name: string) =>
+    owners.names.findIndex(
+      (n, i) => owners.merged[i] && n !== undefined && drawn.has(i) && local(n) === local(name),
+    )
   for (const tip of tips) {
     const owner = owners.of.get(tip.hash)
     if (!shown.has(tip.hash) || owner === undefined || seen.has(tip.name)) continue
     seen.add(tip.name)
     const on = owners.names[owner]
-    const lane = colors[owner] ?? owner
-    out.push(on === tip.name || on === undefined ? { name: tip.name, lane } : { name: tip.name, lane, on })
+    if (on === tip.name || on === undefined) {
+      named.add(owner)
+      out.push({ name: tip.name, lane: color(owner) })
+      continue
+    }
+    const line = lineNamed(tip.name)
+    if (line >= 0) {
+      named.add(line)
+      out.push({ name: tip.name, lane: color(line), on, isMerged: true })
+    } else {
+      out.push({ name: tip.name, lane: color(owner), on })
+    }
   }
   owners.names.forEach((name, i) => {
-    if (owners.merged[i] && name !== undefined && !seen.has(name)) {
+    if (!owners.merged[i] || !drawn.has(i) || named.has(i)) return
+    if (name !== undefined) {
+      if (seen.has(name)) return
       seen.add(name)
-      out.push({ name, lane: colors[i] ?? i, isMerged: true })
+      out.push({ name, lane: color(i), isMerged: true })
+      return
     }
+    const subject = owners.via[i]
+    out.push(
+      subject === undefined
+        ? { name: '名前のない枝', lane: color(i), isMerged: true }
+        : { name: '', lane: color(i), via: subject },
+    )
   })
   return out
 }

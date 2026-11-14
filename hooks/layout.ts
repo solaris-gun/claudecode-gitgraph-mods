@@ -43,6 +43,13 @@ export const mergedName = (subject: string): string | undefined =>
   /^Merge pull request #\d+ from [^/\s]+\/(\S+)/.exec(subject)?.[1] ??
   /^Merge remote-tracking branch '([^']+)'/.exec(subject)?.[1]
 
+/** The branch a merge commit's subject says it was made on: `Merge x into y` → y. */
+export const intoName = (subject: string): string | undefined =>
+  /^Merge .+ into (\S+)\s*$/.exec(subject)?.[1]
+
+/** A branch name without its remote: `origin/x` → `x`. */
+const local = (name: string): string => name.replace(/^origin\//, '')
+
 export type Owners = {
   /** Commit hash → owner index; an owner's index is its color slot. */
   of: Map<string, number>
@@ -89,6 +96,13 @@ export const assignOwners = (commits: Commit[], tips: Tip[]): Owners => {
     names.push(sideName.get(c.hash))
     merged.push(true)
     claim(c.hash, names.length - 1)
+  }
+  // A line still unnamed takes the name its own merges give it:
+  // `Merge develop into feature/x` sits on feature/x's line.
+  for (const c of commits) {
+    const o = of.get(c.hash)
+    const into = intoName(c.subject)
+    if (o !== undefined && merged[o] && names[o] === undefined && into !== undefined) names[o] = into
   }
   return { of, names, merged }
 }
@@ -245,9 +259,11 @@ export const layout = (
 }
 
 /**
- * The legend: each branch tip shown, with its line's color. A branch whose tip
- * sits on another branch's line (merged, or at the same commit) says so; the
- * lines of merged branches that a merge subject names come after.
+ * The legend: one row per branch shown, in the color of its line. A branch
+ * whose tip sits on another branch's line takes the color of its own merged
+ * line when one is drawn (`on` + `isMerged`), else a color of its own, which
+ * its name in the graph is drawn in (`on`). Merged lines follow: named ones by
+ * name, and the unnamed ones as one row with all their colors.
  */
 export const legend = (
   commits: Commit[],
@@ -256,21 +272,59 @@ export const legend = (
   colors: number[],
 ): LegendEntry[] => {
   const shown = new Set(commits.map(c => c.hash))
+  const drawn = new Set(owners.of.values())
   const out: LegendEntry[] = []
   const seen = new Set<string>()
+  const usedLines = new Set<number>()
+  const lineNamed = (name: string) =>
+    owners.names.findIndex(
+      (n, i) => owners.merged[i] && n !== undefined && drawn.has(i) && local(n) === local(name),
+    )
   for (const tip of tips) {
     const owner = owners.of.get(tip.hash)
     if (!shown.has(tip.hash) || owner === undefined || seen.has(tip.name)) continue
     seen.add(tip.name)
     const on = owners.names[owner]
-    const lane = colors[owner] ?? owner
-    out.push(on === tip.name || on === undefined ? { name: tip.name, lane } : { name: tip.name, lane, on })
+    if (on === tip.name || on === undefined) {
+      usedLines.add(owner)
+      out.push({ name: tip.name, lane: colors[owner] ?? owner })
+      continue
+    }
+    const line = lineNamed(tip.name)
+    if (line >= 0) {
+      usedLines.add(line)
+      out.push({ name: tip.name, lane: colors[line] ?? line, on, isMerged: true })
+    } else {
+      out.push({ name: tip.name, lane: -1, on })
+    }
   }
   owners.names.forEach((name, i) => {
-    if (owners.merged[i] && name !== undefined && !seen.has(name)) {
-      seen.add(name)
-      out.push({ name, lane: colors[i] ?? i, isMerged: true })
-    }
+    if (!owners.merged[i] || name === undefined || !drawn.has(i) || usedLines.has(i)) return
+    if (seen.has(name)) return
+    seen.add(name)
+    usedLines.add(i)
+    out.push({ name, lane: colors[i] ?? i, isMerged: true })
   })
+  const unnamed = [
+    ...new Set(
+      owners.names.flatMap((name, i) =>
+        owners.merged[i] && name === undefined && drawn.has(i) ? [colors[i] ?? i] : [],
+      ),
+    ),
+  ]
+  if (unnamed[0] !== undefined) {
+    out.push({ name: '名前のない枝', lane: unnamed[0], more: unnamed.slice(1), isMerged: true })
+  }
+  // A branch with no line of its own: a color no line on screen has, else
+  // the one the legend uses least.
+  const onScreen = new Set([...drawn].map(o => colors[o] ?? o))
+  for (const entry of out) {
+    if (entry.lane >= 0) continue
+    const count = (c: number) => out.filter(e => e.lane === c || e.more?.includes(c)).length
+    const free = Array.from({ length: COLORS }, (_, c) => c).sort(
+      (x, y) => Number(onScreen.has(x)) - Number(onScreen.has(y)) || count(x) - count(y) || x - y,
+    )
+    entry.lane = free[0] ?? 0
+  }
   return out
 }

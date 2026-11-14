@@ -15,7 +15,7 @@ const scope = atom({ plugin: 'claudecode-gitgraph-mods', key: 'scope' } as const
 const snapshot = atom(
   { plugin: 'claudecode-gitgraph-mods', key: 'snapshot' } as const,
   null as Snapshot | null,
-  { shape: 'snapshot-5' },
+  { shape: 'snapshot-6' },
 )
 const view = atom({ plugin: 'claudecode-gitgraph-mods', key: 'view' } as const, 'graph' as View, {
   shape: 'view-1',
@@ -295,9 +295,21 @@ export const register: Register = (on, options) => {
                   <Text mono bold {...lane(entry.lane)}>
                     ┃{' '}
                   </Text>
-                  <Text>{entry.name}</Text>
-                  {entry.on !== undefined && <Text dimColor>（{entry.on} の線上）</Text>}
-                  {entry.isMerged === true && <Text dimColor>（合流済み）</Text>}
+                  {(entry.more ?? []).map(more => (
+                    <Text mono bold {...lane(more)}>
+                      ┃{' '}
+                    </Text>
+                  ))}
+                  <Text bold {...lane(entry.lane)}>
+                    {entry.name}
+                  </Text>
+                  {entry.on !== undefined && entry.isMerged === true && (
+                    <Text dimColor>（{entry.on} に合流済み）</Text>
+                  )}
+                  {entry.on !== undefined && entry.isMerged !== true && (
+                    <Text dimColor>（{entry.on} の線上）</Text>
+                  )}
+                  {entry.on === undefined && entry.isMerged === true && <Text dimColor>（合流済み）</Text>}
                 </Box>
               ))}
           </Box>
@@ -315,9 +327,24 @@ export const register: Register = (on, options) => {
               </Text>
             )}
             {line.refs !== undefined && line.refs !== '' && (
-              <Text color="claude" bold>
-                ({line.refs}){' '}
-              </Text>
+              <Box key={`refs-${line.hash ?? ''}`} flexDirection="row">
+                <Text color="claude" bold>
+                  (
+                </Text>
+                {line.refs.split(', ').map((ref, i) => {
+                  const name = ref.replace(/^HEAD -> /, '')
+                  const entry = snap.legend.find(e => e.name === name)
+                  return (
+                    <Text bold {...(entry === undefined ? { color: 'claude' as ThemeKey } : lane(entry.lane))}>
+                      {i > 0 ? ', ' : ''}
+                      {ref}
+                    </Text>
+                  )
+                })}
+                <Text color="claude" bold>
+                  ){' '}
+                </Text>
+              </Box>
             )}
             {line.subject !== undefined && (
               <Text wrap="truncate">

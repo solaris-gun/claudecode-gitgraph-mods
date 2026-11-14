@@ -33,8 +33,17 @@ export type GraphLine = {
   subject?: string
 }
 
-/** A legend row: a branch and its line's color; `on` names the line it sits on. */
-export type LegendEntry = { name: string; lane: number; on?: string; isMerged?: boolean }
+/**
+ * A legend row: a branch and its color. `on` names the line its tip sits on;
+ * `isMerged` marks a merged line; `more` holds further colors of one row.
+ */
+export type LegendEntry = {
+  name: string
+  lane: number
+  on?: string
+  isMerged?: boolean
+  more?: number[]
+}
 
 /** What the pane shows: the graph, a flat list of the commits, or the branches. */
 export type View = 'graph' | 'history' | 'branches'

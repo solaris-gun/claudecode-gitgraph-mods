@@ -245,6 +245,46 @@ test('a branch at the same commit as another says whose line it sits on', () => 
   })
 })
 
+// develop fast-forwarded over guardian and verifier: their tips sit on
+// develop's line. guardian's own line is named by its `into` merge; verifier
+// has none. Each still gets a color of its own in the legend.
+const forwarded = parseLog(
+  [
+    ['d3', 'v1', 'd3', '9', 'S', 'HEAD -> develop', 'd3'],
+    ['v1', 'm2', 'v1', '8', 'S', 'verifier', 'v1'],
+    ['m2', 'm1 x1', 'm2', '7', 'S', 'guardian', '合流: なにか'],
+    ['x1', 'm1', 'x1', '6', 'S', '', 'x1'],
+    ['m1', 'd2 g2', 'm1', '5', 'S', '', '取り込み: 番人役の判定書の枝'],
+    ['g2', 'g1 d2', 'g2', '4', 'S', '', 'Merge develop into guardian'],
+    ['d2', 'd1', 'd2', '3', 'S', '', 'd2'],
+    ['g1', 'd1', 'g1', '2', 'S', '', 'g1'],
+    ['d1', '', 'd1', '1', 'S', 'main', 'd1'],
+  ]
+    .map(row => row.join(S))
+    .join('\n'),
+)
+
+test('branches on another line still get their own legend color', () => {
+  const tips = [
+    { name: 'main', hash: 'd1' },
+    { name: 'develop', hash: 'd3' },
+    { name: 'guardian', hash: 'm2' },
+    { name: 'verifier', hash: 'v1' },
+  ]
+  const owners = assignOwners(forwarded, tips)
+  const { lines, colors } = layout(forwarded, owners)
+  const entries = legend(forwarded, tips, owners, colors)
+  const by = (name: string) => entries.find(e => e.name === name)
+  // guardian takes the color of its own merged line.
+  const g2 = lines.find(l => l.hash === 'g2')
+  expect(by('guardian')).toMatchObject({ on: 'develop', isMerged: true })
+  expect(g2?.segments.find(seg => seg.text.includes('●'))?.lane).toBe(by('guardian')?.lane)
+  expect(by('verifier')).toMatchObject({ on: 'develop' })
+  // The unnamed line is listed too, and no two rows share a color.
+  expect(by('名前のない枝')).toMatchObject({ isMerged: true })
+  expect(new Set(entries.map(e => e.lane)).size).toBe(entries.length)
+})
+
 test('commitDate reads YYYY.MM.DD-hh:mm', () => {
   expect(commitDate(0)).toMatch(/^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}$/)
 })

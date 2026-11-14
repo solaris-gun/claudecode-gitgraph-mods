@@ -40,32 +40,23 @@ export const parseBranches = (stdout: string): Branch[] =>
       ...parseTrack(row.track),
     }))
 
-const ESC = /\x1b\[([0-9;]*)m/g
-
-/** Splits git's colored graph glyphs into runs of one color. */
-export const parseSegments = (colored: string): GraphSegment[] => {
+/**
+ * Splits graph glyphs into runs of one lane. git draws lane n at column 2n;
+ * a `/`, `\\` or `_` between two lanes belongs to the one on its right,
+ * the lane that forks off or merges in.
+ */
+export const laneSegments = (glyphs: string): GraphSegment[] => {
   const out: GraphSegment[] = []
-  let color: string | undefined
-  let at = 0
-  const push = (text: string) => {
-    if (text === '') return
+  ;[...glyphs].forEach((ch, col) => {
+    const lane = ch === ' ' ? undefined : Math.ceil(col / 2)
     const last = out[out.length - 1]
-    if (last !== undefined && last.color === color) last.text += text
-    else out.push(color === undefined ? { text } : { text, color })
-  }
-  for (const m of colored.matchAll(ESC)) {
-    push(colored.slice(at, m.index))
-    const code = m[1] ?? ''
-    color = code === '' || code === '0' ? undefined : code
-    at = m.index + m[0].length
-  }
-  push(colored.slice(at))
+    if (last !== undefined && last.lane === lane) last.text += ch
+    else out.push(lane === undefined ? { text: ch } : { text: ch, lane })
+  })
   return out
 }
 
-const plain = (colored: string): string => colored.replace(ESC, '')
-
-/** Parses `git log --graph --color=always` lines written with this module's format. */
+/** Parses `git log --graph` lines written with this module's format. */
 export const parseGraph = (stdout: string): GraphLine[] =>
   stdout
     .split('\n')
@@ -73,13 +64,13 @@ export const parseGraph = (stdout: string): GraphLine[] =>
     .map(line => {
       if (!line.includes(SEP)) {
         const glyphs = line.trimEnd()
-        return { graph: plain(glyphs), segments: parseSegments(glyphs) }
+        return { graph: glyphs, segments: laneSegments(glyphs) }
       }
       const [graph = '', hash = '', time = '', author = '', refs = '', subject = ''] =
         line.split(SEP)
       return {
-        graph: plain(graph),
-        segments: parseSegments(graph),
+        graph,
+        segments: laneSegments(graph),
         hash,
         time: Number(time),
         author,
@@ -139,8 +130,7 @@ export const collect = async (
     'log',
     '--graph',
     '--date-order',
-    // Color only the graph glyphs: the format's fields carry no color.
-    '--color=always',
+    '--color=never',
     `-n${COMMITS}`,
     `--format=${SEP}%h${SEP}%at${SEP}%an${SEP}%D${SEP}%s`,
     ...(scope === 'all' ? ['--branches', '--remotes'] : ['--branches']),
@@ -166,3 +156,30 @@ export const commitDate = (seconds: number): string => {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+
+
+/** Branch names in a `%D` decoration: `HEAD -> main, origin/main, tag: v1` → main, origin/main. */
+export const branchNames = (refs: string): string[] =>
+  refs
+    .split(', ')
+    .map(ref => ref.replace(/^HEAD -> /, '').trim())
+    .filter(ref => ref !== '' && ref !== 'HEAD' && !ref.startsWith('tag: ') && !ref.endsWith('/HEAD'))
+
+export type LegendEntry = { name: string; lane: number }
+
+/** Each branch shown in the graph with the lane its tip sits on. */
+export const legend = (lines: GraphLine[]): LegendEntry[] => {
+  const seen = new Set<string>()
+  const out: LegendEntry[] = []
+  for (const line of lines) {
+    if (line.refs === undefined || line.refs === '') continue
+    const col = [...line.graph].indexOf('*')
+    if (col < 0) continue
+    for (const name of branchNames(line.refs)) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      out.push({ name, lane: Math.ceil(col / 2) })
+    }
+  }
+  return out
+}

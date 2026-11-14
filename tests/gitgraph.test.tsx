@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
-import { commitDate, parseSegments } from '../hooks/git'
+import { commitDate, laneSegments, legend } from '../hooks/git'
 
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
@@ -18,8 +18,8 @@ const GIT: Record<string, string> = {
   ].join('\n'),
   log: [
     `* ${S}a1b2c3d${S}${NOW / 1000 - 2 * 3600}${S}Sora${S}HEAD -> main${S}Add graph pane`,
-    `\x1b[31m|\x1b[m * ${S}e4f5a6b${S}${NOW / 1000 - 30 * 3600}${S}Sora${S}feature/x${S}Try feature`,
-    '\x1b[31m|\x1b[m\x1b[31m/\x1b[m',
+    `| * ${S}e4f5a6b${S}${NOW / 1000 - 30 * 3600}${S}Sora${S}feature/x${S}Try feature`,
+    '|/',
     `* ${S}0c0ffee${S}${NOW / 1000 - 3 * 86400}${S}Sora${S}origin/main${S}Initial commit`,
   ].join('\n'),
 }
@@ -136,7 +136,7 @@ test('Git History lists hash, date, author and message without lines', async ($,
     expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /HEAD -> main/ })).toBeUndefined()
     await ui.press({ key: 'view-graph' })
-    expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^╱$/ })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -159,25 +159,46 @@ test('a long message is cut with … to fit the pane, never wrapped', async ($, 
   }
 })
 
-test('graph lines are colored per lane, as git colors them', async ($, on) => {
+test('each lane keeps one color, with a legend naming the branch on it', async ($, on) => {
   engine(on, [])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(GITGRAPH)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    // git's red lane (31) is drawn in the theme's error color, escapes gone.
-    const glyphs = await ui.find({ type: 'Text', text: '|/' })
-    expect(glyphs?.props.color).toBe('error')
-    expect(await ui.find({ type: 'Text', text: /\x1b/ })).toBeUndefined()
+    // "|/": lane 0's line, and lane 1 merging back in, in heavy glyphs.
+    expect((await ui.find({ type: 'Text', text: '╱' }))?.props.color).toBe('success')
+    const text = (await ui.find({ key: 'legend' }))?.text ?? ''
+    expect(text).toContain('凡例:')
+    expect(text).toContain('main')
+    expect(text).toContain('feature/x')
+    // Local scope: the remote branch stays out of the legend.
+    expect(text).not.toContain('origin/main')
     await ui.unmount()
   }
 })
 
-test('parseSegments splits colored glyphs into runs', () => {
-  expect(parseSegments('\x1b[31m|\x1b[m \x1b[1;32m\\\x1b[m')).toEqual([
-    { text: '|', color: '31' },
+test('laneSegments puts a diagonal on the lane to its right', () => {
+  expect(laneSegments('| * ')).toEqual([
+    { text: '|', lane: 0 },
     { text: ' ' },
-    { text: '\\', color: '1;32' },
+    { text: '*', lane: 1 },
+    { text: ' ' },
+  ])
+  expect(laneSegments('|/')).toEqual([
+    { text: '|', lane: 0 },
+    { text: '/', lane: 1 },
+  ])
+})
+
+test('the legend names each branch with the lane of its tip', () => {
+  const lines = [
+    { graph: '* ', segments: [], hash: 'a', refs: 'HEAD -> main, origin/main, tag: v1' },
+    { graph: '| * ', segments: [], hash: 'b', refs: 'feature/x' },
+  ]
+  expect(legend(lines)).toEqual([
+    { name: 'main', lane: 0 },
+    { name: 'origin/main', lane: 0 },
+    { name: 'feature/x', lane: 1 },
   ])
 })

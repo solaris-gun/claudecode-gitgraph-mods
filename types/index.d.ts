@@ -14,9 +14,15 @@ export type Branch = {
   isGone: boolean
 }
 
+/** A run of graph glyphs on one lane (column), absent for spaces. */
+export type GraphSegment = { text: string; lane?: number }
+
 /** One line of `git log --graph`: graph glyphs, then a commit when it has one. */
 export type GraphLine = {
+  /** The graph glyphs as plain text. */
   graph: string
+  /** The same glyphs in runs of one lane, which picks their color. */
+  segments: GraphSegment[]
   hash?: string
   /** Author date, Unix seconds. */
   time?: number

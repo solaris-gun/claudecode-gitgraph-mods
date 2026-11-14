@@ -1,4 +1,4 @@
-import type { Branch, GraphLine, Scope, Snapshot } from '../types'
+import type { Branch, GraphLine, GraphSegment, Scope, Snapshot } from '../types'
 
 export type Run = (
   argv: string[],
@@ -40,6 +40,22 @@ export const parseBranches = (stdout: string): Branch[] =>
       ...parseTrack(row.track),
     }))
 
+/**
+ * Splits graph glyphs into runs of one lane. git draws lane n at column 2n;
+ * a `/`, `\\` or `_` between two lanes belongs to the one on its right,
+ * the lane that forks off or merges in.
+ */
+export const laneSegments = (glyphs: string): GraphSegment[] => {
+  const out: GraphSegment[] = []
+  ;[...glyphs].forEach((ch, col) => {
+    const lane = ch === ' ' ? undefined : Math.ceil(col / 2)
+    const last = out[out.length - 1]
+    if (last !== undefined && last.lane === lane) last.text += ch
+    else out.push(lane === undefined ? { text: ch } : { text: ch, lane })
+  })
+  return out
+}
+
 /** Parses `git log --graph` lines written with this module's format. */
 export const parseGraph = (stdout: string): GraphLine[] =>
   stdout
@@ -47,11 +63,20 @@ export const parseGraph = (stdout: string): GraphLine[] =>
     .filter(line => line.trim() !== '')
     .map(line => {
       if (!line.includes(SEP)) {
-        return { graph: line.trimEnd() }
+        const glyphs = line.trimEnd()
+        return { graph: glyphs, segments: laneSegments(glyphs) }
       }
       const [graph = '', hash = '', time = '', author = '', refs = '', subject = ''] =
         line.split(SEP)
-      return { graph, hash, time: Number(time), author, refs, subject }
+      return {
+        graph,
+        segments: laneSegments(graph),
+        hash,
+        time: Number(time),
+        author,
+        refs,
+        subject,
+      }
     })
 
 /** The status line text: `⎇ main ↑2 ↓0`, or `⎇ main` with no upstream. */
@@ -124,10 +149,37 @@ export const collect = async (
   }
 }
 
-/** A commit's date as Japanese absolute text in local time: `11月14日 09:30`. */
+/** A commit's date in local time as `YYYY.MM.DD-hh:mm`: `2026.11.14-09:30`. */
 export const commitDate = (seconds: number): string => {
   const d = new Date(seconds * 1000)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}-${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+
+
+/** Branch names in a `%D` decoration: `HEAD -> main, origin/main, tag: v1` → main, origin/main. */
+export const branchNames = (refs: string): string[] =>
+  refs
+    .split(', ')
+    .map(ref => ref.replace(/^HEAD -> /, '').trim())
+    .filter(ref => ref !== '' && ref !== 'HEAD' && !ref.startsWith('tag: ') && !ref.endsWith('/HEAD'))
+
+export type LegendEntry = { name: string; lane: number }
+
+/** Each branch shown in the graph with the lane its tip sits on. */
+export const legend = (lines: GraphLine[]): LegendEntry[] => {
+  const seen = new Set<string>()
+  const out: LegendEntry[] = []
+  for (const line of lines) {
+    if (line.refs === undefined || line.refs === '') continue
+    const col = [...line.graph].indexOf('*')
+    if (col < 0) continue
+    for (const name of branchNames(line.refs)) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      out.push({ name, lane: Math.ceil(col / 2) })
+    }
+  }
+  return out
+}

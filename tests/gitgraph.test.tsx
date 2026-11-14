@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
-import { commitDate } from '../hooks/git'
+import { commitDate, laneSegments, legend } from '../hooks/git'
 
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
@@ -136,7 +136,7 @@ test('Git History lists hash, date, author and message without lines', async ($,
     expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /HEAD -> main/ })).toBeUndefined()
     await ui.press({ key: 'view-graph' })
-    expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^╱$/ })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -150,11 +150,59 @@ test('a long message is cut with … to fit the pane, never wrapped', async ($, 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...narrow, surface })
     await ui.press({ key: 'view-history' })
-    // 45 - 35 columns of hash, date and author leave 10 cells.
-    expect(await ui.find({ type: 'Text', text: 'Add graph…' })).toBeDefined()
+    // 45 - 39 columns of hash, date and author leave 6 cells.
+    expect(await ui.find({ type: 'Text', text: 'Add g…' })).toBeDefined()
     await ui.press({ key: 'view-graph' })
     // "* " + "a1b2c3d " + "(HEAD -> main) " leave 45 - 2 - 8 - 15 = 20.
     expect(await ui.find({ type: 'Text', text: 'Add graph pane' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('each lane keeps one color, with a legend naming the branch on it', async ($, on) => {
+  engine(on, [])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // "|/": lane 0's line, and lane 1 merging back in, in heavy glyphs.
+    expect((await ui.find({ type: 'Text', text: '╱' }))?.props.color).toBe('success')
+    const text = (await ui.find({ key: 'legend' }))?.text ?? ''
+    expect(text).toContain('凡例:')
+    expect(text).toContain('main')
+    expect(text).toContain('feature/x')
+    // Local scope: the remote branch stays out of the legend.
+    expect(text).not.toContain('origin/main')
+    await ui.unmount()
+  }
+})
+
+test('laneSegments puts a diagonal on the lane to its right', () => {
+  expect(laneSegments('| * ')).toEqual([
+    { text: '|', lane: 0 },
+    { text: ' ' },
+    { text: '*', lane: 1 },
+    { text: ' ' },
+  ])
+  expect(laneSegments('|/')).toEqual([
+    { text: '|', lane: 0 },
+    { text: '/', lane: 1 },
+  ])
+})
+
+test('the legend names each branch with the lane of its tip', () => {
+  const lines = [
+    { graph: '* ', segments: [], hash: 'a', refs: 'HEAD -> main, origin/main, tag: v1' },
+    { graph: '| * ', segments: [], hash: 'b', refs: 'feature/x' },
+  ]
+  expect(legend(lines)).toEqual([
+    { name: 'main', lane: 0 },
+    { name: 'origin/main', lane: 0 },
+    { name: 'feature/x', lane: 1 },
+  ])
+})
+
+test('commitDate reads YYYY.MM.DD-hh:mm', () => {
+  expect(commitDate(0)).toMatch(/^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}$/)
 })

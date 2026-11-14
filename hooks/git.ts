@@ -131,17 +131,3 @@ export const commitDate = (seconds: number): string => {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// A table cell's text: no line breaks, and pipes and backslashes escaped.
-const cell = (text: string): string =>
-  text.replace(/[\r\n]+/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
-
-/** The commits as a Markdown table: ハッシュ, 日時, 作成者, メッセージ. */
-export const historyTable = (lines: GraphLine[]): string =>
-  [
-    '| ハッシュ | 日時 | 作成者 | メッセージ |',
-    '| --- | --- | --- | --- |',
-    ...lines.map(
-      line =>
-        `| \`${line.hash ?? ''}\` | ${line.time === undefined ? '' : commitDate(line.time)} | ${cell(line.author ?? '')} | ${cell(line.subject ?? '')} |`,
-    ),
-  ].join('\n')

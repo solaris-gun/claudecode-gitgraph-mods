@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
-import { commitDate, historyTable } from '../hooks/git'
+import { commitDate } from '../hooks/git'
 
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
@@ -119,7 +119,7 @@ test('a git command Claude runs refreshes; others do not', async ($, on) => {
   expect(logs() - before).toBe(2)
 })
 
-test('Git History shows a table of hash, date, author and message', async ($, on) => {
+test('Git History lists hash, date, author and message without lines', async ($, on) => {
   engine(on, [])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(GITGRAPH)
@@ -128,19 +128,33 @@ test('Git History shows a table of hash, date, author and message', async ($, on
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'view-history' })
-    const table = (await ui.find({ key: 'history' }))?.text ?? ''
-    expect(table).toContain('| ハッシュ | 日時 | 作成者 | メッセージ |')
-    expect(table).toContain(`| \`a1b2c3d\` | ${date} | Sora | Add graph pane |`)
-    // Four columns only: no branch labels.
-    expect(table).not.toContain('HEAD -> main')
+    expect(await ui.find({ type: 'Text', text: /^ハッシュ\s+日時\s+作成者\s+メッセージ$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: new RegExp(`^${date}`) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Sora/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Add graph pane/ })).toBeDefined()
+    // No table: no Markdown, no pipes, no branch labels.
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /HEAD -> main/ })).toBeUndefined()
     await ui.press({ key: 'view-graph' })
-    expect(await ui.find({ key: 'history' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeDefined()
     await ui.unmount()
   }
 })
 
-test('a pipe in a message stays inside its cell', () => {
-  const table = historyTable([{ graph: '* ', hash: 'abc1234', time: 0, author: 'A', subject: 'a | b' }])
-  expect(table).toContain('| a \\| b |')
+test('a long message is cut with … to fit the pane, never wrapped', async ($, on) => {
+  engine(on, [])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+  const narrow = { ...PANE, props: { ...PANE.props, bodyColumns: 45 } }
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...narrow, surface })
+    await ui.press({ key: 'view-history' })
+    // 45 - 35 columns of hash, date and author leave 10 cells.
+    expect(await ui.find({ type: 'Text', text: 'Add graph…' })).toBeDefined()
+    await ui.press({ key: 'view-graph' })
+    // "* " + "a1b2c3d " + "(HEAD -> main) " leave 45 - 2 - 8 - 15 = 20.
+    expect(await ui.find({ type: 'Text', text: 'Add graph pane' })).toBeDefined()
+    await ui.unmount()
+  }
 })

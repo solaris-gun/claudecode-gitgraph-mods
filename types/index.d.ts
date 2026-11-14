@@ -18,9 +18,15 @@ export type Branch = {
 export type GraphLine = {
   graph: string
   hash?: string
+  /** Author date, Unix seconds. */
+  time?: number
+  author?: string
   refs?: string
   subject?: string
 }
+
+/** What the pane shows: the graph, or a flat list of the commits. */
+export type View = 'graph' | 'history'
 
 export type Snapshot = {
   isRepo: boolean
@@ -38,6 +44,7 @@ declare module 'claude-code' {
   interface PluginState {
     'claudecode-gitgraph-mods': {
       scope: Shaped<Scope>
+      view: Shaped<View>
       snapshot: Shaped<Snapshot | null>
     }
   }

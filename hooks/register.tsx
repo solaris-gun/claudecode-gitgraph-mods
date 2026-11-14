@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Scope, Snapshot } from '../types'
-import { COMMITS, collect, isGitCommand, statusText } from './git'
+import type { GraphLine, Scope, Snapshot, View } from '../types'
+import { COMMITS, collect, isGitCommand, relativeTime, statusText } from './git'
 
 const PANE = 'gitgraph'
 const TITLE = 'Git Graph'
@@ -15,8 +15,24 @@ const scope = atom({ plugin: 'claudecode-gitgraph-mods', key: 'scope' } as const
 const snapshot = atom(
   { plugin: 'claudecode-gitgraph-mods', key: 'snapshot' } as const,
   null as Snapshot | null,
-  { shape: 'snapshot-1' },
+  { shape: 'snapshot-2' },
 )
+const view = atom({ plugin: 'claudecode-gitgraph-mods', key: 'view' } as const, 'graph' as View, {
+  shape: 'view-1',
+})
+
+// Display width in terminal cells: CJK and full-width characters take two.
+const cells = (text: string): number =>
+  [...text].reduce((n, ch) => n + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1), 0)
+const padCells = (text: string, width: number): string => {
+  let out = ''
+  for (const ch of text) {
+    if (cells(out + ch) > width) break
+    out += ch
+  }
+  return out + ' '.repeat(width - cells(out))
+}
+const commits = (graph: GraphLine[]) => graph.filter(line => line.hash !== undefined)
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 const clockText = (ms: number): string => {
@@ -98,7 +114,9 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const shown = await read($, scope)
+    const mode = await read($, view)
     const snap = await read($, snapshot)
+    const now = await $.clock.now()
 
     const setScope = async (to: Scope) => {
       await update($, scope, () => to)
@@ -128,6 +146,26 @@ export const register: Register = (on, options) => {
         </Button>
       </Box>
     )
+    const viewbar = (
+      <Box flexDirection="row" gap={1}>
+        <Button
+          key="view-graph"
+          hotkey="g"
+          variant={mode === 'graph' ? 'primary' : 'secondary'}
+          onPress={() => update($, view, () => 'graph')}
+        >
+          {mode === 'graph' ? '● ' : '○ '}グラフ
+        </Button>
+        <Button
+          key="view-history"
+          hotkey="h"
+          variant={mode === 'history' ? 'primary' : 'secondary'}
+          onPress={() => update($, view, () => 'history')}
+        >
+          {mode === 'history' ? '● ' : '○ '}履歴
+        </Button>
+      </Box>
+    )
 
     if (snap === null) {
       return (
@@ -153,6 +191,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {toolbar}
+        {viewbar}
         <Text dimColor>
           現在: {snap.head} ・ 更新 {clockText(snap.updatedAt)}
         </Text>
@@ -175,10 +214,32 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
 
-        <Text bold>グラフ（直近{COMMITS}件）</Text>
+        <Text bold>
+          {mode === 'graph' ? 'グラフ' : '履歴'}（直近{COMMITS}件）
+        </Text>
         {snap.scope !== shown && <Text dimColor>切り替え中…</Text>}
         {snap.graph.length === 0 && <Text dimColor>コミットがまだありません。</Text>}
-        {snap.graph.map(line => (
+        {mode === 'history' &&
+          commits(snap.graph).map(line => (
+            <Box flexDirection="row">
+              <Text color="warning" mono>
+                {line.hash}{' '}
+              </Text>
+              <Text dimColor mono>
+                {padCells(line.time === undefined ? '' : relativeTime(line.time, now), 10)}
+              </Text>
+              <Text color="suggestion" mono>
+                {padCells(line.author ?? '', 12)}
+              </Text>
+              {line.refs !== undefined && line.refs !== '' && (
+                <Text color="success" bold>
+                  ({line.refs}){' '}
+                </Text>
+              )}
+              <Text wrap="truncate">{line.subject ?? ''}</Text>
+            </Box>
+          ))}
+        {mode === 'graph' && snap.graph.map(line => (
           <Box flexDirection="row">
             <Text color="suggestion" mono>
               {line.graph}

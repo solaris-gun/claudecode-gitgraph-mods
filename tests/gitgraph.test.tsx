@@ -2,6 +2,7 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 const S = '\x1f'
+const NOW = Date.UTC(2026, 10, 14, 0, 30)
 
 // What git answers in a repository on `main`, two ahead of origin/main,
 // with a local `feature/x` that tracks nothing.
@@ -14,10 +15,10 @@ const GIT: Record<string, string> = {
     ['', 'refs/remotes/origin/main', 'origin/main', '', ''].join(S),
   ].join('\n'),
   log: [
-    `* ${S}a1b2c3d${S}HEAD -> main${S}Add graph pane`,
-    `| * ${S}e4f5a6b${S}feature/x${S}Try feature`,
+    `* ${S}a1b2c3d${S}${NOW / 1000 - 2 * 3600}${S}Sora${S}HEAD -> main${S}Add graph pane`,
+    `| * ${S}e4f5a6b${S}${NOW / 1000 - 30 * 3600}${S}Sora${S}feature/x${S}Try feature`,
     '|/',
-    `* ${S}0c0ffee${S}origin/main${S}Initial commit`,
+    `* ${S}0c0ffee${S}${NOW / 1000 - 3 * 86400}${S}Sora${S}origin/main${S}Initial commit`,
   ].join('\n'),
 }
 
@@ -46,7 +47,7 @@ const engine = (on: On, seen: string[][]) => {
   on('command.register', () => ({ value: { command: 'gitgraph' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.status', () => ({ value: undefined }))
-  on('clock.now', () => ({ value: Date.UTC(2026, 10, 14, 0, 30) }))
+  on('clock.now', () => ({ value: NOW }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
   on('process.run', (_, e) => {
@@ -114,4 +115,24 @@ test('a git command Claude runs refreshes; others do not', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: 'git checkout -b topic' })
   await $.command.run(GITGRAPH)
   expect(logs() - before).toBe(2)
+})
+
+test('the history button lists the commits with age and author', async ($, on) => {
+  engine(on, [])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'view-history' })
+    expect(await ui.find({ type: 'Text', text: /^2時間前/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^昨日/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^3日前/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Sora/ })).toBeDefined()
+    // No graph glyph rows in the list.
+    expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeUndefined()
+    await ui.press({ key: 'view-graph' })
+    expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeDefined()
+    await ui.unmount()
+  }
 })

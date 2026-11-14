@@ -49,8 +49,9 @@ export const parseGraph = (stdout: string): GraphLine[] =>
       if (!line.includes(SEP)) {
         return { graph: line.trimEnd() }
       }
-      const [graph = '', hash = '', refs = '', subject = ''] = line.split(SEP)
-      return { graph, hash, refs, subject }
+      const [graph = '', hash = '', time = '', author = '', refs = '', subject = ''] =
+        line.split(SEP)
+      return { graph, hash, time: Number(time), author, refs, subject }
     })
 
 /** The status line text: `⎇ main ↑2 ↓0`, or `⎇ main` with no upstream. */
@@ -106,7 +107,7 @@ export const collect = async (
     '--date-order',
     '--color=never',
     `-n${COMMITS}`,
-    `--format=${SEP}%h${SEP}%D${SEP}%s`,
+    `--format=${SEP}%h${SEP}%at${SEP}%an${SEP}%D${SEP}%s`,
     ...(scope === 'all' ? ['--branches', '--remotes'] : ['--branches']),
     'HEAD',
   ])
@@ -121,4 +122,19 @@ export const collect = async (
     graph,
     ...(refs.exitCode === 0 ? {} : { error: refs.stderr.trim() }),
   }
+}
+
+/** A commit's age as Japanese relative text: たった今, 5分前, 2時間前, 昨日, 3日前, 2か月前, 1年前. */
+export const relativeTime = (seconds: number, nowMs: number): string => {
+  const diff = Math.max(0, Math.floor(nowMs / 1000 - seconds))
+  const minute = 60
+  const hour = 60 * minute
+  const day = 24 * hour
+  if (diff < minute) return 'たった今'
+  if (diff < hour) return `${Math.floor(diff / minute)}分前`
+  if (diff < day) return `${Math.floor(diff / hour)}時間前`
+  if (diff < 2 * day) return '昨日'
+  if (diff < 30 * day) return `${Math.floor(diff / day)}日前`
+  if (diff < 365 * day) return `${Math.floor(diff / (30 * day))}か月前`
+  return `${Math.floor(diff / (365 * day))}年前`
 }

@@ -1,0 +1,5 @@
+{
+  "name": "claudecode-gitgraph-mods",
+  "owner": { "name": "solaris-gun" },
+  "plugins": [{ "name": "claudecode-gitgraph-mods", "source": "./" }]
+}

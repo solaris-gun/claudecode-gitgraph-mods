@@ -1,0 +1,18 @@
+{
+  "name": "claudecode-gitgraph-mods",
+  "version": "0.2.0",
+  "description": "ClaudeCode-GitGraph-mods: /gitgraph opens a pane with the Git branch list, ahead/behind and commit graph",
+  "license": "MIT",
+  "author": {
+    "name": "Solaris-gun"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "statusLine": {
+      "type": "boolean",
+      "title": "Show branch in status line",
+      "description": "Show the current branch and ahead/behind (⎇ main ↑2 ↓0) in the status line",
+      "default": true
+    }
+  }
+}

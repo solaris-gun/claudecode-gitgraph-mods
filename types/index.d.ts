@@ -12,9 +12,11 @@ export type Branch = {
   behind: number
   /** The upstream is configured but no longer exists. */
   isGone: boolean
+  /** The full hash of the commit the branch points at. */
+  tip?: string
 }
 
-/** A run of graph glyphs on one lane (column), absent for spaces. */
+/** A run of graph glyphs on one branch's line; `lane` picks the color, absent for spaces. */
 export type GraphSegment = { text: string; lane?: number }
 
 /** One line of `git log --graph`: graph glyphs, then a commit when it has one. */
@@ -31,6 +33,9 @@ export type GraphLine = {
   subject?: string
 }
 
+/** A legend row: a branch and its line's color; `on` names the line it sits on. */
+export type LegendEntry = { name: string; lane: number; on?: string; isMerged?: boolean }
+
 /** What the pane shows: the graph, a flat list of the commits, or the branches. */
 export type View = 'graph' | 'history' | 'branches'
 
@@ -40,6 +45,8 @@ export type Snapshot = {
   head: string
   branches: Branch[]
   graph: GraphLine[]
+  /** The branches the graph shows, each with its line's color. */
+  legend: LegendEntry[]
   /** Which scope the graph was read for. */
   scope: Scope
   updatedAt: number

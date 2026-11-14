@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, ThemeKey } from 'claude-code'
 
 import type { GraphLine, Scope, Snapshot, View } from '../types'
-import { COMMITS, collect, commitDate, isGitCommand, legend, statusText } from './git'
+import { COMMITS, collect, commitDate, isGitCommand, statusText } from './git'
 
 const PANE = 'gitgraph'
 const TITLE = 'Git Graph'
@@ -15,7 +15,7 @@ const scope = atom({ plugin: 'claudecode-gitgraph-mods', key: 'scope' } as const
 const snapshot = atom(
   { plugin: 'claudecode-gitgraph-mods', key: 'snapshot' } as const,
   null as Snapshot | null,
-  { shape: 'snapshot-4' },
+  { shape: 'snapshot-5' },
 )
 const view = atom({ plugin: 'claudecode-gitgraph-mods', key: 'view' } as const, 'graph' as View, {
   shape: 'view-1',
@@ -39,14 +39,10 @@ const fit = (text: string, width: number): string => {
   if (width <= 1) return width === 1 ? '…' : ''
   return padCells(line, width - 1).trimEnd() + '…'
 }
-// One theme color per lane (column), cycling, so they read in light and dark.
+// One theme color per branch line, cycling, so they read in light and dark.
 const LANES: ThemeKey[] = ['error', 'success', 'warning', 'suggestion', 'merged', 'planMode']
 const lane = (index: number | undefined): { color?: ThemeKey } =>
   index === undefined ? {} : { color: LANES[index % LANES.length] }
-
-// Heavier glyphs than git's ASCII, so the lines read as lines.
-const HEAVY: Record<string, string> = { '|': '┃', '/': '╱', '\\': '╲', '_': '━', '-': '━', '*': '●' }
-const heavy = (text: string): string => [...text].map(ch => HEAVY[ch] ?? ch).join('')
 
 const commits = (graph: GraphLine[]) => graph.filter(line => line.hash !== undefined)
 
@@ -81,6 +77,7 @@ async function refresh($: EngineInterface): Promise<void> {
           head: '',
           branches: [],
           graph: [],
+          legend: [],
           scope: current,
           updatedAt: now,
           error: error instanceof Error ? error.message : String(error),
@@ -291,23 +288,25 @@ export const register: Register = (on, options) => {
         {mode === 'graph' && snap.graph.length > 0 && (
           <Box key="legend" flexDirection="row" flexWrap="wrap" columnGap={2}>
             <Text dimColor>凡例:</Text>
-            {legend(snap.graph)
+            {snap.legend
               .filter(entry => shown === 'all' || !remotes.has(entry.name))
               .map(entry => (
-              <Box flexDirection="row">
-                <Text mono bold {...lane(entry.lane)}>
-                  ┃{' '}
-                </Text>
-                <Text>{entry.name}</Text>
-              </Box>
-            ))}
+                <Box flexDirection="row">
+                  <Text mono bold {...lane(entry.lane)}>
+                    ┃{' '}
+                  </Text>
+                  <Text>{entry.name}</Text>
+                  {entry.on !== undefined && <Text dimColor>（{entry.on} の線上）</Text>}
+                  {entry.isMerged === true && <Text dimColor>（合流済み）</Text>}
+                </Box>
+              ))}
           </Box>
         )}
         {mode === 'graph' && snap.graph.map(line => (
           <Box flexDirection="row">
             {line.segments.map(seg => (
               <Text mono bold {...lane(seg.lane)}>
-                {heavy(seg.text)}
+                {seg.text}
               </Text>
             ))}
             {line.hash !== undefined && (

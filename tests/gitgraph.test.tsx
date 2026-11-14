@@ -1,7 +1,8 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
-import { commitDate, laneSegments, legend } from '../hooks/git'
+import { commitDate } from '../hooks/git'
+import { assignOwners, layout, legend, parseLog } from '../hooks/layout'
 
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
@@ -11,16 +12,15 @@ const NOW = Date.UTC(2026, 10, 14, 0, 30)
 const GIT: Record<string, string> = {
   'rev-parse': 'true\n',
   'for-each-ref': [
-    ['', 'refs/heads/feature/x', 'feature/x', '', ''].join(S),
-    ['*', 'refs/heads/main', 'main', 'origin/main', 'ahead 2'].join(S),
-    ['', 'refs/remotes/origin/HEAD', 'origin/HEAD', '', ''].join(S),
-    ['', 'refs/remotes/origin/main', 'origin/main', '', ''].join(S),
+    ['', 'refs/heads/feature/x', 'feature/x', '', '', 'e4'].join(S),
+    ['*', 'refs/heads/main', 'main', 'origin/main', 'ahead 2', 'a1'].join(S),
+    ['', 'refs/remotes/origin/HEAD', 'origin/HEAD', '', '', '0c'].join(S),
+    ['', 'refs/remotes/origin/main', 'origin/main', '', '', '0c'].join(S),
   ].join('\n'),
   log: [
-    `* ${S}a1b2c3d${S}${NOW / 1000 - 2 * 3600}${S}Sora${S}HEAD -> main${S}Add graph pane`,
-    `| * ${S}e4f5a6b${S}${NOW / 1000 - 30 * 3600}${S}Sora${S}feature/x${S}Try feature`,
-    '|/',
-    `* ${S}0c0ffee${S}${NOW / 1000 - 3 * 86400}${S}Sora${S}origin/main${S}Initial commit`,
+    ['a1', '0c', 'a1b2c3d', NOW / 1000 - 2 * 3600, 'Sora', 'HEAD -> main', 'Add graph pane'].join(S),
+    ['e4', '0c', 'e4f5a6b', NOW / 1000 - 30 * 3600, 'Sora', 'feature/x', 'Try feature'].join(S),
+    ['0c', '', '0c0ffee', NOW / 1000 - 3 * 86400, 'Sora', 'origin/main', 'Initial commit'].join(S),
   ].join('\n'),
 }
 
@@ -148,7 +148,7 @@ test('Git History lists hash, date, author and message without lines', async ($,
     expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /HEAD -> main/ })).toBeUndefined()
     await ui.press({ key: 'view-graph' })
-    expect(await ui.find({ type: 'Text', text: /^╱$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^━┛$/ })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -165,21 +165,22 @@ test('a long message is cut with … to fit the pane, never wrapped', async ($, 
     // 45 - 39 columns of hash, date and author leave 6 cells.
     expect(await ui.find({ type: 'Text', text: 'Add g…' })).toBeDefined()
     await ui.press({ key: 'view-graph' })
-    // "* " + "a1b2c3d " + "(HEAD -> main) " leave 45 - 2 - 8 - 15 = 20.
+    // "● " + "a1b2c3d " + "(HEAD -> main) " leave 45 - 2 - 8 - 15 = 20.
     expect(await ui.find({ type: 'Text', text: 'Add graph pane' })).toBeDefined()
     await ui.unmount()
   }
 })
 
-test('each lane keeps one color, with a legend naming the branch on it', async ($, on) => {
+test('each branch keeps one color, and the legend matches it', async ($, on) => {
   engine(on, [])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(GITGRAPH)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    // "|/": lane 0's line, and lane 1 merging back in, in heavy glyphs.
-    expect((await ui.find({ type: 'Text', text: '╱' }))?.props.color).toBe('success')
+    // feature/x forks off main's first commit in its own color, the second.
+    expect((await ui.find({ type: 'Text', text: '━┛' }))?.props.color).toBe('success')
+    expect((await ui.find({ type: 'Text', text: '●' }))?.props.color).toBe('error')
     const text = (await ui.find({ key: 'legend' }))?.text ?? ''
     expect(text).toContain('凡例:')
     expect(text).toContain('main')
@@ -190,29 +191,58 @@ test('each lane keeps one color, with a legend naming the branch on it', async (
   }
 })
 
-test('laneSegments puts a diagonal on the lane to its right', () => {
-  expect(laneSegments('| * ')).toEqual([
-    { text: '|', lane: 0 },
-    { text: ' ' },
-    { text: '*', lane: 1 },
-    { text: ' ' },
+// develop (current) with two merged report branches, as in a real repo: each
+// branch's line and its legend entry get the same color.
+const merged = parseLog(
+  [
+    ['m2', 'm1 g1', 'm2', '9', 'S', 'HEAD -> develop', "Merge branch 'guardian' into develop"],
+    ['g1', 'm1', 'g1', '8', 'S', 'guardian', 'g1'],
+    ['m1', 'd1 v1', 'm1', '7', 'S', '', "Merge branch 'verifier' into develop"],
+    ['v1', 'd1', 'v1', '6', 'S', 'verifier', 'v1'],
+    ['d1', 'r0', 'd1', '5', 'S', '', 'd1'],
+    ['r0', '', 'r0', '4', 'S', 'main', 'init'],
+  ]
+    .map(row => row.join(S))
+    .join('\n'),
+)
+const mergedTips = [
+  { name: 'main', hash: 'r0' },
+  { name: 'develop', hash: 'm2' },
+  { name: 'guardian', hash: 'g1' },
+  { name: 'verifier', hash: 'v1' },
+]
+
+test('a merged branch keeps its own line and color, and the legend says which', () => {
+  const owners = assignOwners(merged, mergedTips)
+  const { lines, colors } = layout(merged, owners)
+  // main on the left; develop right of it; each merged branch right of develop.
+  expect(lines.map(l => l.graph.trimEnd())).toEqual([
+    '  ●━┓',
+    '  ┃ ●',
+    '  ●━┛━┓',
+    '  ┃   ●',
+    '  ●━━━┛',
+    '●━┛',
   ])
-  expect(laneSegments('|/')).toEqual([
-    { text: '|', lane: 0 },
-    { text: '/', lane: 1 },
-  ])
+  const entries = legend(merged, mergedTips, owners, colors)
+  expect(entries.map(e => e.name)).toEqual(['main', 'develop', 'guardian', 'verifier'])
+  // Four branches, four colors.
+  expect(new Set(entries.map(e => e.lane)).size).toBe(4)
+  // Each tip's ● has its legend color.
+  for (const e of entries.slice(1)) {
+    const line = lines.find(l => l.refs?.includes(e.name))
+    expect(line?.segments.find(seg => seg.text.includes('●'))?.lane).toBe(e.lane)
+  }
 })
 
-test('the legend names each branch with the lane of its tip', () => {
-  const lines = [
-    { graph: '* ', segments: [], hash: 'a', refs: 'HEAD -> main, origin/main, tag: v1' },
-    { graph: '| * ', segments: [], hash: 'b', refs: 'feature/x' },
-  ]
-  expect(legend(lines)).toEqual([
-    { name: 'main', lane: 0 },
-    { name: 'origin/main', lane: 0 },
-    { name: 'feature/x', lane: 1 },
-  ])
+test('a branch at the same commit as another says whose line it sits on', () => {
+  const tips = [...mergedTips, { name: 'origin/develop', hash: 'm2' }]
+  const owners = assignOwners(merged, tips)
+  const { colors } = layout(merged, owners)
+  expect(legend(merged, tips, owners, colors).at(-1)).toMatchObject({
+    name: 'origin/develop',
+    on: 'develop',
+  })
 })
 
 test('commitDate reads YYYY.MM.DD-hh:mm', () => {

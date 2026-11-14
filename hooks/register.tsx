@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GraphLine, Scope, Snapshot, View } from '../types'
-import { COMMITS, collect, isGitCommand, relativeTime, statusText } from './git'
+import { COMMITS, collect, isGitCommand, commitDate, statusText } from './git'
 
 const PANE = 'gitgraph'
 const TITLE = 'Git Graph'
@@ -116,7 +116,6 @@ export const register: Register = (on, options) => {
     const shown = await read($, scope)
     const mode = await read($, view)
     const snap = await read($, snapshot)
-    const now = await $.clock.now()
 
     const setScope = async (to: Scope) => {
       await update($, scope, () => to)
@@ -154,7 +153,7 @@ export const register: Register = (on, options) => {
           variant={mode === 'graph' ? 'primary' : 'secondary'}
           onPress={() => update($, view, () => 'graph')}
         >
-          {mode === 'graph' ? '● ' : '○ '}グラフ
+          {mode === 'graph' ? '● ' : '○ '}Git Graph
         </Button>
         <Button
           key="view-history"
@@ -162,7 +161,7 @@ export const register: Register = (on, options) => {
           variant={mode === 'history' ? 'primary' : 'secondary'}
           onPress={() => update($, view, () => 'history')}
         >
-          {mode === 'history' ? '● ' : '○ '}履歴
+          {mode === 'history' ? '● ' : '○ '}Git History
         </Button>
       </Box>
     )
@@ -215,7 +214,7 @@ export const register: Register = (on, options) => {
         ))}
 
         <Text bold>
-          {mode === 'graph' ? 'グラフ' : '履歴'}（直近{COMMITS}件）
+          {mode === 'graph' ? 'Git Graph' : 'Git History'}（直近{COMMITS}件）
         </Text>
         {snap.scope !== shown && <Text dimColor>切り替え中…</Text>}
         {snap.graph.length === 0 && <Text dimColor>コミットがまだありません。</Text>}
@@ -226,16 +225,11 @@ export const register: Register = (on, options) => {
                 {line.hash}{' '}
               </Text>
               <Text dimColor mono>
-                {padCells(line.time === undefined ? '' : relativeTime(line.time, now), 10)}
+                {padCells(line.time === undefined ? '' : commitDate(line.time), 14)}
               </Text>
               <Text color="suggestion" mono>
                 {padCells(line.author ?? '', 12)}
               </Text>
-              {line.refs !== undefined && line.refs !== '' && (
-                <Text color="success" bold>
-                  ({line.refs}){' '}
-                </Text>
-              )}
               <Text wrap="truncate">{line.subject ?? ''}</Text>
             </Box>
           ))}

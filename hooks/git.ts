@@ -124,17 +124,9 @@ export const collect = async (
   }
 }
 
-/** A commit's age as Japanese relative text: たった今, 5分前, 2時間前, 昨日, 3日前, 2か月前, 1年前. */
-export const relativeTime = (seconds: number, nowMs: number): string => {
-  const diff = Math.max(0, Math.floor(nowMs / 1000 - seconds))
-  const minute = 60
-  const hour = 60 * minute
-  const day = 24 * hour
-  if (diff < minute) return 'たった今'
-  if (diff < hour) return `${Math.floor(diff / minute)}分前`
-  if (diff < day) return `${Math.floor(diff / hour)}時間前`
-  if (diff < 2 * day) return '昨日'
-  if (diff < 30 * day) return `${Math.floor(diff / day)}日前`
-  if (diff < 365 * day) return `${Math.floor(diff / (30 * day))}か月前`
-  return `${Math.floor(diff / (365 * day))}年前`
+/** A commit's date as Japanese absolute text in local time: `11月14日 09:30`. */
+export const commitDate = (seconds: number): string => {
+  const d = new Date(seconds * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }

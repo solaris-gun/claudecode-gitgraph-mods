@@ -1,6 +1,8 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
+import { commitDate } from '../hooks/git'
+
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
 
@@ -117,19 +119,20 @@ test('a git command Claude runs refreshes; others do not', async ($, on) => {
   expect(logs() - before).toBe(2)
 })
 
-test('the history button lists the commits with age and author', async ($, on) => {
+test('Git History lists hash, date, author and message', async ($, on) => {
   engine(on, [])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(GITGRAPH)
+  const date = commitDate(NOW / 1000 - 2 * 3600)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'view-history' })
-    expect(await ui.find({ type: 'Text', text: /^2時間前/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^昨日/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^3日前/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: new RegExp(`^${date}`) })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^Sora/ })).toBeDefined()
-    // No graph glyph rows in the list.
+    expect(await ui.find({ type: 'Text', text: /Add graph pane/ })).toBeDefined()
+    // Four columns only: no branch labels, no graph glyph rows.
+    expect(await ui.find({ type: 'Text', text: /HEAD -> main/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeUndefined()
     await ui.press({ key: 'view-graph' })
     expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeDefined()

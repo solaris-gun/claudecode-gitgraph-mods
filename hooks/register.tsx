@@ -32,6 +32,13 @@ const padCells = (text: string, width: number): string => {
   }
   return out + ' '.repeat(width - cells(out))
 }
+// One line that fits `width` cells: cut with … rather than wrapped.
+const fit = (text: string, width: number): string => {
+  const line = text.replace(/[\r\n]+/g, ' ')
+  if (cells(line) <= width) return line
+  if (width <= 1) return width === 1 ? '…' : ''
+  return padCells(line, width - 1).trimEnd() + '…'
+}
 const commits = (graph: GraphLine[]) => graph.filter(line => line.hash !== undefined)
 
 const pad = (n: number): string => String(n).padStart(2, '0')
@@ -116,6 +123,7 @@ export const register: Register = (on, options) => {
     const shown = await read($, scope)
     const mode = await read($, view)
     const snap = await read($, snapshot)
+    const columns = e.props.bodyColumns ?? 80
 
     const setScope = async (to: Scope) => {
       await update($, scope, () => to)
@@ -238,7 +246,7 @@ export const register: Register = (on, options) => {
               <Text color="suggestion" mono>
                 {padCells(line.author ?? '', 12)}
               </Text>
-              <Text wrap="truncate">{line.subject ?? ''}</Text>
+              <Text wrap="truncate">{fit(line.subject ?? '', columns - 9 - 14 - 12)}</Text>
             </Box>
           ))}
         {mode === 'graph' && snap.graph.map(line => (
@@ -256,7 +264,18 @@ export const register: Register = (on, options) => {
                 ({line.refs}){' '}
               </Text>
             )}
-            {line.subject !== undefined && <Text wrap="truncate">{line.subject}</Text>}
+            {line.subject !== undefined && (
+              <Text wrap="truncate">
+                {fit(
+                  line.subject,
+                  columns -
+                    cells(line.graph) -
+                    cells(line.hash ?? '') -
+                    1 -
+                    (line.refs ? cells(line.refs) + 3 : 0),
+                )}
+              </Text>
+            )}
           </Box>
         ))}
       </Box>

@@ -140,3 +140,21 @@ test('Git History lists hash, date, author and message without lines', async ($,
     await ui.unmount()
   }
 })
+
+test('a long message is cut with … to fit the pane, never wrapped', async ($, on) => {
+  engine(on, [])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+  const narrow = { ...PANE, props: { ...PANE.props, bodyColumns: 45 } }
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...narrow, surface })
+    await ui.press({ key: 'view-history' })
+    // 45 - 35 columns of hash, date and author leave 10 cells.
+    expect(await ui.find({ type: 'Text', text: 'Add graph…' })).toBeDefined()
+    await ui.press({ key: 'view-graph' })
+    // "* " + "a1b2c3d " + "(HEAD -> main) " leave 45 - 2 - 8 - 15 = 20.
+    expect(await ui.find({ type: 'Text', text: 'Add graph pane' })).toBeDefined()
+    await ui.unmount()
+  }
+})

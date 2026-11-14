@@ -288,6 +288,21 @@ test('every line in the graph has a legend row in its color', () => {
   for (const lane of drawn) expect(entries.some(e => e.lane === lane)).toBe(true)
 })
 
+test('hashes line up and branch names stay on one line', async ($, on) => {
+  engine(on, [])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // The graph is 4 cells wide at its widest ("●━┛ "): the main row pads 2.
+  const top = await ui.find({ type: 'Text', text: 'a1b2c3d ' })
+  expect(top).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ {2}$/ })).toBeDefined()
+  // origin/main sits with nothing local at 0c0ffee in local scope: kept;
+  // a remote name next to its local twin is left out.
+  expect(await ui.find({ type: 'Text', text: 'origin/main' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('commitDate reads YYYY.MM.DD-hh:mm', () => {
   expect(commitDate(0)).toMatch(/^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}$/)
 })

@@ -31,8 +31,8 @@ export type GraphLine = {
   subject?: string
 }
 
-/** What the pane shows: the graph, or a flat list of the commits. */
-export type View = 'graph' | 'history'
+/** What the pane shows: the graph, a flat list of the commits, or the branches. */
+export type View = 'graph' | 'history' | 'branches'
 
 export type Snapshot = {
   isRepo: boolean

@@ -45,9 +45,12 @@ const PANE = {
   },
 } as const
 
-const engine = (on: On, seen: string[][]) => {
+const engine = (on: On, seen: string[][], opens: unknown[] = []) => {
   on('command.register', () => ({ value: { command: 'gitgraph' } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    opens.push(e)
+    return { value: { isPlaced: true } }
+  })
   on('ui.status', () => ({ value: undefined }))
   on('clock.now', () => ({ value: NOW }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -66,19 +69,28 @@ const engine = (on: On, seen: string[][]) => {
   })
 }
 
-test('/gitgraph draws branches, ahead/behind and the graph', async ($, on) => {
+test('/gitgraph opens on the graph; the branches have their own view', async ($, on) => {
   const seen: string[][] = []
-  engine(on, seen)
+  const opens: unknown[] = []
+  engine(on, seen, opens)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(GITGRAPH)
+  // It takes the keys, so the hotkeys work at once, and asks for room.
+  expect(opens.at(-1)).toMatchObject({ focus: true, closeOnEscape: true, rows: 30 })
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await ui.find({ type: 'Text', text: /\* main/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /↑2 ↓0/ })).toBeDefined()
+    // The graph is right under the summary: no branch rows push it away.
     expect(await ui.find({ type: 'Text', text: /Add graph pane/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\* main/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /現在: main → origin\/main ↑2 ↓0/ })).toBeDefined()
+
+    await ui.press({ key: 'view-branches' })
+    expect(await ui.find({ type: 'Text', text: /\* main/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Add graph pane/ })).toBeUndefined()
     // Local scope by default: remote branches are not listed.
     expect(await ui.find({ type: 'Text', text: /^\s*origin\/main$/ })).toBeUndefined()
+    await ui.press({ key: 'view-graph' })
     await ui.unmount()
   }
   const log = seen.find(argv => argv[1] === 'log')
@@ -205,4 +217,18 @@ test('the legend names each branch with the lane of its tip', () => {
 
 test('commitDate reads YYYY.MM.DD-hh:mm', () => {
   expect(commitDate(0)).toMatch(/^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}$/)
+})
+
+test('/gitgraph close closes the pane', async ($, on) => {
+  const closes: unknown[] = []
+  engine(on, [])
+  on('ui.close', (_, e) => {
+    closes.push(e)
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+  const done = await $.command.run({ ...GITGRAPH, args: 'close' })
+  expect(done.text).toBe('Git Graph pane closed.')
+  expect(closes.at(-1)).toMatchObject({ id: 'gitgraph' })
 })

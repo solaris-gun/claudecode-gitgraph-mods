@@ -1,6 +1,6 @@
 {
   "name": "claudecode-gitgraph-mods",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "ClaudeCode-GitGraph-mods: /gitgraph opens a pane with the Git branch list, ahead/behind and commit graph",
   "license": "MIT",
   "author": {

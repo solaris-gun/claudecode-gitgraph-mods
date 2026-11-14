@@ -1,4 +1,5 @@
-import type { Branch, GraphLine, GraphSegment, Scope, Snapshot } from '../types'
+import type { Branch, Scope, Snapshot } from '../types'
+import { assignOwners, layout, legend, parseLog, type Tip } from './layout'
 
 export type Run = (
   argv: string[],
@@ -26,9 +27,9 @@ export const parseBranches = (stdout: string): Branch[] =>
     .split('\n')
     .filter(line => line.trim() !== '')
     .map(line => {
-      const [head = '', ref = '', name = '', upstream = '', track = ''] =
+      const [head = '', ref = '', name = '', upstream = '', track = '', tip = ''] =
         line.split(SEP)
-      return { head, ref, name, upstream, track }
+      return { head, ref, name, upstream, track, tip }
     })
     // `origin/HEAD` is a pointer, not a branch.
     .filter(row => !(row.ref.startsWith('refs/remotes/') && row.ref.endsWith('/HEAD')))
@@ -36,48 +37,32 @@ export const parseBranches = (stdout: string): Branch[] =>
       name: row.name,
       isCurrent: row.head === '*',
       isRemote: row.ref.startsWith('refs/remotes/'),
+      ...(row.tip === '' ? {} : { tip: row.tip }),
       ...(row.upstream === '' ? {} : { upstream: row.upstream }),
       ...parseTrack(row.track),
     }))
 
-/**
- * Splits graph glyphs into runs of one lane. git draws lane n at column 2n;
- * a `/`, `\\` or `_` between two lanes belongs to the one on its right,
- * the lane that forks off or merges in.
- */
-export const laneSegments = (glyphs: string): GraphSegment[] => {
-  const out: GraphSegment[] = []
-  ;[...glyphs].forEach((ch, col) => {
-    const lane = ch === ' ' ? undefined : Math.ceil(col / 2)
-    const last = out[out.length - 1]
-    if (last !== undefined && last.lane === lane) last.text += ch
-    else out.push(lane === undefined ? { text: ch } : { text: ch, lane })
-  })
-  return out
+// Long-lived branches claim their line first, so a topic branch forked from
+// one does not take its history.
+const TRUNKS = ['main', 'master', 'develop', 'dev', 'trunk']
+const trunkRank = (name: string): number => {
+  const i = TRUNKS.indexOf(name.replace(/^[^/]+\//, ''))
+  return i < 0 ? TRUNKS.length : i
 }
 
-/** Parses `git log --graph` lines written with this module's format. */
-export const parseGraph = (stdout: string): GraphLine[] =>
-  stdout
-    .split('\n')
-    .filter(line => line.trim() !== '')
-    .map(line => {
-      if (!line.includes(SEP)) {
-        const glyphs = line.trimEnd()
-        return { graph: glyphs, segments: laneSegments(glyphs) }
-      }
-      const [graph = '', hash = '', time = '', author = '', refs = '', subject = ''] =
-        line.split(SEP)
-      return {
-        graph,
-        segments: laneSegments(graph),
-        hash,
-        time: Number(time),
-        author,
-        refs,
-        subject,
-      }
-    })
+/**
+ * The order branches claim their lines in: trunk branches (local before
+ * remote), then the current branch, then the rest as git listed them.
+ */
+export const tipOrder = (branches: Branch[], scope: Scope): Tip[] => {
+  const shown = branches.filter(b => b.tip !== undefined && (scope === 'all' || !b.isRemote))
+  const rank = (b: Branch) =>
+    trunkRank(b.name) < TRUNKS.length ? trunkRank(b.name) * 2 + (b.isRemote ? 1 : 0) : b.isCurrent ? TRUNKS.length * 2 : TRUNKS.length * 2 + 1 + (b.isRemote ? 1 : 0)
+  return shown
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => rank(x.b) - rank(y.b) || x.i - y.i)
+    .map(({ b }) => ({ name: b.name, hash: b.tip ?? '' }))
+}
 
 /** The status line text: `⎇ main ↑2 ↓0`, or `⎇ main` with no upstream. */
 export const statusText = (snapshot: Snapshot): string => {
@@ -102,6 +87,7 @@ export const collect = async (
     head: '',
     branches: [],
     graph: [],
+    legend: [],
     scope,
     updatedAt: now,
   }
@@ -113,7 +99,7 @@ export const collect = async (
   const refs = await run([
     'git',
     'for-each-ref',
-    '--format=%(HEAD)%1f%(refname)%1f%(refname:short)%1f%(upstream:short)%1f%(upstream:track,nobracket)',
+    '--format=%(HEAD)%1f%(refname)%1f%(refname:short)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(objectname)',
     'refs/heads',
     'refs/remotes',
   ])
@@ -128,16 +114,20 @@ export const collect = async (
   const log = await run([
     'git',
     'log',
-    '--graph',
     '--date-order',
-    '--color=never',
     `-n${COMMITS}`,
-    `--format=${SEP}%h${SEP}%at${SEP}%an${SEP}%D${SEP}%s`,
+    '--format=%H%x1f%P%x1f%h%x1f%at%x1f%an%x1f%D%x1f%s',
     ...(scope === 'all' ? ['--branches', '--remotes'] : ['--branches']),
     'HEAD',
   ])
   // A repository with no commits yet has no HEAD to log: an empty graph.
-  const graph = log.exitCode === 0 ? parseGraph(log.stdout) : []
+  const shown = log.exitCode === 0 ? parseLog(log.stdout) : []
+  const tips = tipOrder(branches, scope)
+  if (!branches.some(b => b.isCurrent) && shown[0] !== undefined) {
+    tips.push({ name: 'HEAD', hash: shown[0].hash })
+  }
+  const owners = assignOwners(shown, tips)
+  const { lines: graph, colors } = layout(shown, owners)
 
   return {
     ...empty,
@@ -145,6 +135,7 @@ export const collect = async (
     head,
     branches,
     graph,
+    legend: legend(shown, tips, owners, colors),
     ...(refs.exitCode === 0 ? {} : { error: refs.stderr.trim() }),
   }
 }
@@ -164,22 +155,3 @@ export const branchNames = (refs: string): string[] =>
     .split(', ')
     .map(ref => ref.replace(/^HEAD -> /, '').trim())
     .filter(ref => ref !== '' && ref !== 'HEAD' && !ref.startsWith('tag: ') && !ref.endsWith('/HEAD'))
-
-export type LegendEntry = { name: string; lane: number }
-
-/** Each branch shown in the graph with the lane its tip sits on. */
-export const legend = (lines: GraphLine[]): LegendEntry[] => {
-  const seen = new Set<string>()
-  const out: LegendEntry[] = []
-  for (const line of lines) {
-    if (line.refs === undefined || line.refs === '') continue
-    const col = [...line.graph].indexOf('*')
-    if (col < 0) continue
-    for (const name of branchNames(line.refs)) {
-      if (seen.has(name)) continue
-      seen.add(name)
-      out.push({ name, lane: Math.ceil(col / 2) })
-    }
-  }
-  return out
-}

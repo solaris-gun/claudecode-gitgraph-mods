@@ -103,7 +103,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'gitgraph',
-      description: 'Open the Git branch graph pane',
+      description: 'Open the Git branch graph pane (/gitgraph close to close it)',
     })
     const started = await next(e)
     if (showStatus) {
@@ -112,9 +112,15 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('command.run', { command: 'gitgraph' }, async $ => {
+  on('command.run', { command: 'gitgraph' }, async ($, e) => {
+    if (e.args.trim() === 'close') {
+      await $.ui.close({ id: PANE })
+      return { text: 'Git Graph pane closed.' }
+    }
     await refresh($)
-    await $.ui.open({ id: PANE, title: TITLE })
+    // Take the keys so L/A/R/G/H/B work at once (Esc closes the pane), and
+    // ask for room for the graph when seated inline above the prompt.
+    await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, rows: 30 })
     return { text: 'Git Graph pane opened.' }
   })
 
@@ -180,6 +186,14 @@ export const register: Register = (on, options) => {
         >
           {mode === 'history' ? '● ' : '○ '}Git History
         </Button>
+        <Button
+          key="view-branches"
+          hotkey="b"
+          variant={mode === 'branches' ? 'primary' : 'secondary'}
+          onPress={() => update($, view, () => 'branches')}
+        >
+          {mode === 'branches' ? '● ' : '○ '}ブランチ一覧
+        </Button>
       </Box>
     )
 
@@ -204,38 +218,53 @@ export const register: Register = (on, options) => {
 
     const branches = snap.branches.filter(b => shown === 'all' || !b.isRemote)
     const remotes = new Set(snap.branches.filter(b => b.isRemote).map(b => b.name))
+    const current = snap.branches.find(b => b.isCurrent)
 
     return (
       <Box flexDirection="column">
         {toolbar}
         {viewbar}
+        {!e.props.isFocused && (
+          <Text dimColor>
+            キー操作: ctrl+x tab でこのペインへ ・ 閉じる: ctrl+x x または /gitgraph close
+          </Text>
+        )}
         <Text dimColor>
-          現在: {snap.head} ・ 更新 {clockText(snap.updatedAt)}
+          現在: {snap.head}
+          {current?.upstream !== undefined
+            ? ` → ${current.upstream} ↑${current.ahead} ↓${current.behind}`
+            : ''}
+          {' ・ '}ブランチ {branches.length} ・ 更新 {clockText(snap.updatedAt)}
         </Text>
 
-        <Text bold>ブランチ（{branches.length}）</Text>
-        {branches.map(b => (
-          <Box flexDirection="row">
-            <Text color={b.isCurrent ? 'success' : undefined} bold={b.isCurrent} mono>
-              {b.isCurrent ? '* ' : '  '}
-              {b.name}
-            </Text>
-            {b.upstream !== undefined ? (
-              <Text dimColor>
-                {' '}→ {b.upstream}
-                {b.isGone ? ' (gone)' : ` ↑${b.ahead} ↓${b.behind}`}
+        {mode === 'branches' && <Text bold>ブランチ（{branches.length}）</Text>}
+        {mode === 'branches' &&
+          branches.map(b => (
+            <Box flexDirection="row">
+              <Text color={b.isCurrent ? 'success' : undefined} bold={b.isCurrent} mono>
+                {b.isCurrent ? '* ' : '  '}
+                {b.name}
               </Text>
-            ) : (
-              !b.isRemote && <Text dimColor> (upstream なし)</Text>
-            )}
-          </Box>
-        ))}
+              {b.upstream !== undefined ? (
+                <Text dimColor>
+                  {' '}→ {b.upstream}
+                  {b.isGone ? ' (gone)' : ` ↑${b.ahead} ↓${b.behind}`}
+                </Text>
+              ) : (
+                !b.isRemote && <Text dimColor> (upstream なし)</Text>
+              )}
+            </Box>
+          ))}
 
-        <Text bold>
-          {mode === 'graph' ? 'Git Graph' : 'Git History'}（直近{COMMITS}件）
-        </Text>
+        {mode !== 'branches' && (
+          <Text bold>
+            {mode === 'graph' ? 'Git Graph' : 'Git History'}（直近{COMMITS}件）
+          </Text>
+        )}
         {snap.scope !== shown && <Text dimColor>切り替え中…</Text>}
-        {snap.graph.length === 0 && <Text dimColor>コミットがまだありません。</Text>}
+        {mode !== 'branches' && snap.graph.length === 0 && (
+          <Text dimColor>コミットがまだありません。</Text>
+        )}
         {mode === 'history' && commits(snap.graph).length > 0 && (
           <Text bold dimColor mono>
             {padCells('ハッシュ', 9)}

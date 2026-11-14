@@ -150,8 +150,8 @@ test('a long message is cut with … to fit the pane, never wrapped', async ($, 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...narrow, surface })
     await ui.press({ key: 'view-history' })
-    // 45 - 35 columns of hash, date and author leave 10 cells.
-    expect(await ui.find({ type: 'Text', text: 'Add graph…' })).toBeDefined()
+    // 45 - 39 columns of hash, date and author leave 6 cells.
+    expect(await ui.find({ type: 'Text', text: 'Add g…' })).toBeDefined()
     await ui.press({ key: 'view-graph' })
     // "* " + "a1b2c3d " + "(HEAD -> main) " leave 45 - 2 - 8 - 15 = 20.
     expect(await ui.find({ type: 'Text', text: 'Add graph pane' })).toBeDefined()
@@ -201,4 +201,8 @@ test('the legend names each branch with the lane of its tip', () => {
     { name: 'origin/main', lane: 0 },
     { name: 'feature/x', lane: 1 },
   ])
+})
+
+test('commitDate reads YYYY.MM.DD-hh:mm', () => {
+  expect(commitDate(0)).toMatch(/^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}$/)
 })

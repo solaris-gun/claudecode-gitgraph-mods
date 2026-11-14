@@ -239,7 +239,7 @@ export const register: Register = (on, options) => {
         {mode === 'history' && commits(snap.graph).length > 0 && (
           <Text bold dimColor mono>
             {padCells('ハッシュ', 9)}
-            {padCells('日時', 14)}
+            {padCells('日時', 18)}
             {padCells('作成者', 12)}
             メッセージ
           </Text>
@@ -251,12 +251,12 @@ export const register: Register = (on, options) => {
                 {padCells(line.hash ?? '', 9)}
               </Text>
               <Text dimColor mono>
-                {padCells(line.time === undefined ? '' : commitDate(line.time), 14)}
+                {padCells(line.time === undefined ? '' : commitDate(line.time), 18)}
               </Text>
               <Text color="suggestion" mono>
                 {padCells(line.author ?? '', 12)}
               </Text>
-              <Text wrap="truncate">{fit(line.subject ?? '', columns - 9 - 14 - 12)}</Text>
+              <Text wrap="truncate">{fit(line.subject ?? '', columns - 9 - 18 - 12)}</Text>
             </Box>
           ))}
         {mode === 'graph' && snap.graph.length > 0 && (

@@ -149,11 +149,11 @@ export const collect = async (
   }
 }
 
-/** A commit's date as Japanese absolute text in local time: `11月14日 09:30`. */
+/** A commit's date in local time as `YYYY.MM.DD-hh:mm`: `2026.11.14-09:30`. */
 export const commitDate = (seconds: number): string => {
   const d = new Date(seconds * 1000)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}-${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 

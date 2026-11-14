@@ -286,32 +286,35 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
         {mode === 'graph' && snap.graph.length > 0 && (
-          <Box key="legend" flexDirection="row" flexWrap="wrap" columnGap={2}>
-            <Text dimColor>凡例:</Text>
+          <Box key="legend" flexDirection="column">
+            <Text dimColor>凡例（線の色 → ブランチ）:</Text>
             {snap.legend
               .filter(entry => shown === 'all' || !remotes.has(entry.name))
-              .map(entry => (
-                <Box flexDirection="row">
-                  <Text mono bold {...lane(entry.lane)}>
-                    ┃{' '}
-                  </Text>
-                  {(entry.more ?? []).map(more => (
-                    <Text mono bold {...lane(more)}>
-                      ┃{' '}
+              .map(entry => {
+                const note =
+                  entry.via !== undefined
+                    ? ''
+                    : entry.on !== undefined
+                      ? entry.isMerged === true
+                        ? `（${entry.on} に合流済み）`
+                        : `（${entry.on} の線上）`
+                      : entry.isMerged === true
+                        ? '（合流済み）'
+                        : ''
+                const name =
+                  entry.via !== undefined ? `「${entry.via}」で合流した枝` : entry.name
+                return (
+                  <Box flexDirection="row">
+                    <Text mono bold {...lane(entry.lane)}>
+                      {'  '}┃{' '}
                     </Text>
-                  ))}
-                  <Text bold {...lane(entry.lane)}>
-                    {entry.name}
-                  </Text>
-                  {entry.on !== undefined && entry.isMerged === true && (
-                    <Text dimColor>（{entry.on} に合流済み）</Text>
-                  )}
-                  {entry.on !== undefined && entry.isMerged !== true && (
-                    <Text dimColor>（{entry.on} の線上）</Text>
-                  )}
-                  {entry.on === undefined && entry.isMerged === true && <Text dimColor>（合流済み）</Text>}
-                </Box>
-              ))}
+                    <Text bold={entry.via === undefined} {...lane(entry.lane)} wrap="truncate">
+                      {fit(name, Math.max(columns - 4 - cells(note), 8))}
+                    </Text>
+                    {note !== '' && <Text dimColor>{note}</Text>}
+                  </Box>
+                )
+              })}
           </Box>
         )}
         {mode === 'graph' && snap.graph.map(line => (

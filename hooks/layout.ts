@@ -57,19 +57,23 @@ export type Owners = {
   names: (string | undefined)[]
   /** Owner index → true when it is a merged branch found from a merge commit. */
   merged: boolean[]
+  /** Owner index → the subject of the merge commit that takes the line in. */
+  via: (string | undefined)[]
 }
 
 /**
  * Gives each commit to one branch: each tip, in order, claims its first-parent
  * chain until it meets a commit already claimed. Commits no tip claims (the
  * side of a merge whose branch is gone or merged) go to a line of their own,
- * named from the merge commit's subject where it says.
+ * named from the merge commit's subject where it says, from a branch in
+ * `others` at its newest commit, or from its own `Merge x into <branch>`.
  */
-export const assignOwners = (commits: Commit[], tips: Tip[]): Owners => {
+export const assignOwners = (commits: Commit[], tips: Tip[], others: Tip[] = []): Owners => {
   const byHash = new Map(commits.map(c => [c.hash, c]))
   const of = new Map<string, number>()
   const names: (string | undefined)[] = []
   const merged: boolean[] = []
+  const via: (string | undefined)[] = []
   const claim = (from: string, owner: number) => {
     let at: string | undefined = from
     while (at !== undefined && byHash.has(at) && !of.has(at)) {
@@ -81,21 +85,34 @@ export const assignOwners = (commits: Commit[], tips: Tip[]): Owners => {
     if (!byHash.has(tip.hash) || of.has(tip.hash)) continue
     names.push(tip.name)
     merged.push(false)
+    via.push(undefined)
     claim(tip.hash, names.length - 1)
   }
   // Name the side of each merge after the branch its subject names.
   const sideName = new Map<string, string>()
+  const mergedBy = new Map<string, string>()
   for (const c of commits) {
     const name = mergedName(c.subject)
     for (const p of c.parents.slice(1)) {
       if (name !== undefined && !sideName.has(p)) sideName.set(p, name)
+      if (!mergedBy.has(p)) mergedBy.set(p, c.subject)
     }
   }
   for (const c of commits) {
     if (of.has(c.hash)) continue
     names.push(sideName.get(c.hash))
     merged.push(true)
+    via.push(mergedBy.get(c.hash))
     claim(c.hash, names.length - 1)
+  }
+  // A line still unnamed takes the name of a branch not drawn (a remote one
+  // in local scope) that points at its newest commit.
+  for (const other of others) {
+    const o = of.get(other.hash)
+    if (o !== undefined && merged[o] && names[o] === undefined) {
+      const newest = commits.find(c => of.get(c.hash) === o)
+      if (newest?.hash === other.hash) names[o] = local(other.name)
+    }
   }
   // A line still unnamed takes the name its own merges give it:
   // `Merge develop into feature/x` sits on feature/x's line.
@@ -104,7 +121,7 @@ export const assignOwners = (commits: Commit[], tips: Tip[]): Owners => {
     const into = intoName(c.subject)
     if (o !== undefined && merged[o] && names[o] === undefined && into !== undefined) names[o] = into
   }
-  return { of, names, merged }
+  return { of, names, merged, via }
 }
 
 type Cell = { ch: string; lane?: number }
@@ -259,11 +276,11 @@ export const layout = (
 }
 
 /**
- * The legend: one row per branch shown, in the color of its line. A branch
- * whose tip sits on another branch's line takes the color of its own merged
- * line when one is drawn (`on` + `isMerged`), else a color of its own, which
- * its name in the graph is drawn in (`on`). Merged lines follow: named ones by
- * name, and the unnamed ones as one row with all their colors.
+ * The legend: one row per line drawn, in that line's color, so each color in
+ * the graph says which branch it is. A branch tip on another branch's line
+ * either names its own merged line (`Merge x into <branch>`) or shares that
+ * line's color (`on`). A merged line no branch name reaches is named by the
+ * subject of the merge that took it in (`via`).
  */
 export const legend = (
   commits: Commit[],
@@ -275,7 +292,8 @@ export const legend = (
   const drawn = new Set(owners.of.values())
   const out: LegendEntry[] = []
   const seen = new Set<string>()
-  const usedLines = new Set<number>()
+  const named = new Set<number>()
+  const color = (o: number) => colors[o] ?? o
   const lineNamed = (name: string) =>
     owners.names.findIndex(
       (n, i) => owners.merged[i] && n !== undefined && drawn.has(i) && local(n) === local(name),
@@ -286,45 +304,32 @@ export const legend = (
     seen.add(tip.name)
     const on = owners.names[owner]
     if (on === tip.name || on === undefined) {
-      usedLines.add(owner)
-      out.push({ name: tip.name, lane: colors[owner] ?? owner })
+      named.add(owner)
+      out.push({ name: tip.name, lane: color(owner) })
       continue
     }
     const line = lineNamed(tip.name)
     if (line >= 0) {
-      usedLines.add(line)
-      out.push({ name: tip.name, lane: colors[line] ?? line, on, isMerged: true })
+      named.add(line)
+      out.push({ name: tip.name, lane: color(line), on, isMerged: true })
     } else {
-      out.push({ name: tip.name, lane: -1, on })
+      out.push({ name: tip.name, lane: color(owner), on })
     }
   }
   owners.names.forEach((name, i) => {
-    if (!owners.merged[i] || name === undefined || !drawn.has(i) || usedLines.has(i)) return
-    if (seen.has(name)) return
-    seen.add(name)
-    usedLines.add(i)
-    out.push({ name, lane: colors[i] ?? i, isMerged: true })
-  })
-  const unnamed = [
-    ...new Set(
-      owners.names.flatMap((name, i) =>
-        owners.merged[i] && name === undefined && drawn.has(i) ? [colors[i] ?? i] : [],
-      ),
-    ),
-  ]
-  if (unnamed[0] !== undefined) {
-    out.push({ name: '名前のない枝', lane: unnamed[0], more: unnamed.slice(1), isMerged: true })
-  }
-  // A branch with no line of its own: a color no line on screen has, else
-  // the one the legend uses least.
-  const onScreen = new Set([...drawn].map(o => colors[o] ?? o))
-  for (const entry of out) {
-    if (entry.lane >= 0) continue
-    const count = (c: number) => out.filter(e => e.lane === c || e.more?.includes(c)).length
-    const free = Array.from({ length: COLORS }, (_, c) => c).sort(
-      (x, y) => Number(onScreen.has(x)) - Number(onScreen.has(y)) || count(x) - count(y) || x - y,
+    if (!owners.merged[i] || !drawn.has(i) || named.has(i)) return
+    if (name !== undefined) {
+      if (seen.has(name)) return
+      seen.add(name)
+      out.push({ name, lane: color(i), isMerged: true })
+      return
+    }
+    const subject = owners.via[i]
+    out.push(
+      subject === undefined
+        ? { name: '名前のない枝', lane: color(i), isMerged: true }
+        : { name: '', lane: color(i), via: subject },
     )
-    entry.lane = free[0] ?? 0
-  }
+  })
   return out
 }

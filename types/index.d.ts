@@ -35,14 +35,15 @@ export type GraphLine = {
 
 /**
  * A legend row: a branch and its color. `on` names the line its tip sits on;
- * `isMerged` marks a merged line; `more` holds further colors of one row.
+ * `isMerged` marks a merged line.
  */
 export type LegendEntry = {
   name: string
   lane: number
   on?: string
   isMerged?: boolean
-  more?: number[]
+  /** For a merged line no branch name reaches: the merge commit's subject. */
+  via?: string
 }
 
 /** What the pane shows: the graph, a flat list of the commits, or the branches. */

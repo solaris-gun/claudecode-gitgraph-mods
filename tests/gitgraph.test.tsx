@@ -182,7 +182,7 @@ test('each branch keeps one color, and the legend matches it', async ($, on) => 
     expect((await ui.find({ type: 'Text', text: '━┛' }))?.props.color).toBe('success')
     expect((await ui.find({ type: 'Text', text: '●' }))?.props.color).toBe('error')
     const text = (await ui.find({ key: 'legend' }))?.text ?? ''
-    expect(text).toContain('凡例:')
+    expect(text).toContain('凡例')
     expect(text).toContain('main')
     expect(text).toContain('feature/x')
     // Local scope: the remote branch stays out of the legend.
@@ -264,7 +264,7 @@ const forwarded = parseLog(
     .join('\n'),
 )
 
-test('branches on another line still get their own legend color', () => {
+test('every line in the graph has a legend row in its color', () => {
   const tips = [
     { name: 'main', hash: 'd1' },
     { name: 'develop', hash: 'd3' },
@@ -275,14 +275,17 @@ test('branches on another line still get their own legend color', () => {
   const { lines, colors } = layout(forwarded, owners)
   const entries = legend(forwarded, tips, owners, colors)
   const by = (name: string) => entries.find(e => e.name === name)
-  // guardian takes the color of its own merged line.
-  const g2 = lines.find(l => l.hash === 'g2')
-  expect(by('guardian')).toMatchObject({ on: 'develop', isMerged: true })
-  expect(g2?.segments.find(seg => seg.text.includes('●'))?.lane).toBe(by('guardian')?.lane)
-  expect(by('verifier')).toMatchObject({ on: 'develop' })
-  // The unnamed line is listed too, and no two rows share a color.
-  expect(by('名前のない枝')).toMatchObject({ isMerged: true })
-  expect(new Set(entries.map(e => e.lane)).size).toBe(entries.length)
+  const dot = (hash: string) =>
+    lines.find(l => l.hash === hash)?.segments.find(seg => seg.text.includes('●'))?.lane
+  // guardian's own line is named by `Merge develop into guardian`.
+  expect(by('guardian')).toMatchObject({ on: 'develop', isMerged: true, lane: dot('g2') })
+  // verifier has no line of its own: it shares develop's color.
+  expect(by('verifier')).toMatchObject({ on: 'develop', lane: dot('d3') })
+  // The x1 line no name reaches is named by the merge that took it in.
+  expect(entries.find(e => e.via === '合流: なにか')?.lane).toBe(dot('x1'))
+  // Every color drawn has a legend row.
+  const drawn = new Set(lines.flatMap(l => l.segments.flatMap(seg => (seg.lane === undefined ? [] : [seg.lane]))))
+  for (const lane of drawn) expect(entries.some(e => e.lane === lane)).toBe(true)
 })
 
 test('commitDate reads YYYY.MM.DD-hh:mm', () => {

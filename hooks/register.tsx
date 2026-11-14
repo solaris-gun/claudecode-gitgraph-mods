@@ -44,6 +44,16 @@ const LANES: ThemeKey[] = ['error', 'success', 'warning', 'suggestion', 'merged'
 const lane = (index: number | undefined): { color?: ThemeKey } =>
   index === undefined ? {} : { color: LANES[index % LANES.length] }
 
+// The branch names in a `%D` decoration, shortest form: `origin/x` is left
+// out when `x` sits at the same commit, and so is `origin/HEAD`.
+const shortRefs = (refs: string): { text: string; name: string }[] => {
+  const parts = refs.split(', ').filter(ref => ref !== '' && !ref.endsWith('/HEAD'))
+  const names = new Set(parts.map(ref => ref.replace(/^HEAD -> /, '')))
+  return parts
+    .filter(ref => !(/^[^/]+\//.test(ref) && names.has(ref.replace(/^[^/]+\//, '')) && ref.startsWith('origin/')))
+    .map(ref => ({ text: ref, name: ref.replace(/^HEAD -> /, '') }))
+}
+
 const commits = (graph: GraphLine[]) => graph.filter(line => line.hash !== undefined)
 
 const pad = (n: number): string => String(n).padStart(2, '0')
@@ -136,6 +146,8 @@ export const register: Register = (on, options) => {
     const mode = await read($, view)
     const snap = await read($, snapshot)
     const columns = e.props.bodyColumns ?? 80
+    // Every row's graph is padded to the widest, so hashes line up.
+    const graphWidth = Math.max(0, ...(snap?.graph ?? []).map(line => cells(line.graph)))
 
     const setScope = async (to: Scope) => {
       await update($, scope, () => to)
@@ -317,52 +329,63 @@ export const register: Register = (on, options) => {
               })}
           </Box>
         )}
-        {mode === 'graph' && snap.graph.map(line => (
-          <Box flexDirection="row">
-            {line.segments.map(seg => (
-              <Text mono bold {...lane(seg.lane)}>
-                {seg.text}
-              </Text>
-            ))}
-            {line.hash !== undefined && (
-              <Text dimColor mono>
-                {line.hash}{' '}
-              </Text>
-            )}
-            {line.refs !== undefined && line.refs !== '' && (
-              <Box key={`refs-${line.hash ?? ''}`} flexDirection="row">
-                <Text color="claude" bold>
-                  (
-                </Text>
-                {line.refs.split(', ').map((ref, i) => {
-                  const name = ref.replace(/^HEAD -> /, '')
-                  const entry = snap.legend.find(e => e.name === name)
-                  return (
-                    <Text bold {...(entry === undefined ? { color: 'claude' as ThemeKey } : lane(entry.lane))}>
-                      {i > 0 ? ', ' : ''}
-                      {ref}
-                    </Text>
-                  )
-                })}
-                <Text color="claude" bold>
-                  ){' '}
-                </Text>
-              </Box>
-            )}
-            {line.subject !== undefined && (
-              <Text wrap="truncate">
-                {fit(
-                  line.subject,
-                  columns -
-                    cells(line.graph) -
-                    cells(line.hash ?? '') -
-                    1 -
-                    (line.refs ? cells(line.refs) + 3 : 0),
+        {mode === 'graph' &&
+          snap.graph.map(line => {
+            const refs = shortRefs(line.refs ?? '')
+            // Room after the graph and hash: refs first, then the subject.
+            const room = Math.max(columns - graphWidth - cells(line.hash ?? '') - 1, 0)
+            const shownRefs: { text: string; lane?: number }[] = []
+            let used = 0
+            if (refs.length > 0) {
+              const budget = Math.max(Math.min(room - 12, Math.floor(room * 0.6)), 8)
+              used = 3 // "(" + ") "
+              for (const [i, ref] of refs.entries()) {
+                const text = (i > 0 ? ', ' : '') + ref.text
+                const rest = refs.length - i - 1
+                if (used + cells(text) + (rest > 0 ? 2 : 0) > budget) {
+                  shownRefs.push({ text: fit(text, Math.max(budget - used, 1)) })
+                  used = budget
+                  break
+                }
+                const entry = snap.legend.find(e => e.name === ref.name)
+                shownRefs.push(entry === undefined ? { text } : { text, lane: entry.lane })
+                used += cells(text)
+              }
+            }
+            return (
+              <Box flexDirection="row">
+                {line.segments.map(seg => (
+                  <Text mono bold {...lane(seg.lane)}>
+                    {seg.text}
+                  </Text>
+                ))}
+                <Text mono>{' '.repeat(Math.max(graphWidth - cells(line.graph), 0))}</Text>
+                {line.hash !== undefined && (
+                  <Text dimColor mono>
+                    {line.hash}{' '}
+                  </Text>
                 )}
-              </Text>
-            )}
-          </Box>
-        ))}
+                {shownRefs.length > 0 && (
+                  <Box key={`refs-${line.hash ?? ''}`} flexDirection="row">
+                    <Text color="claude" bold>
+                      (
+                    </Text>
+                    {shownRefs.map(ref => (
+                      <Text bold wrap="truncate" {...(ref.lane === undefined ? { color: 'claude' as ThemeKey } : lane(ref.lane))}>
+                        {ref.text}
+                      </Text>
+                    ))}
+                    <Text color="claude" bold>
+                      ){' '}
+                    </Text>
+                  </Box>
+                )}
+                {line.subject !== undefined && (
+                  <Text wrap="truncate">{fit(line.subject, room - used)}</Text>
+                )}
+              </Box>
+            )
+          })}
       </Box>
     )
   })

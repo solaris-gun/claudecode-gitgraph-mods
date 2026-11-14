@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GraphLine, Scope, Snapshot, View } from '../types'
-import { COMMITS, collect, isGitCommand, commitDate, statusText } from './git'
+import { COMMITS, collect, historyTable, isGitCommand, statusText } from './git'
 
 const PANE = 'gitgraph'
 const TITLE = 'Git Graph'
@@ -21,17 +21,6 @@ const view = atom({ plugin: 'claudecode-gitgraph-mods', key: 'view' } as const, 
   shape: 'view-1',
 })
 
-// Display width in terminal cells: CJK and full-width characters take two.
-const cells = (text: string): number =>
-  [...text].reduce((n, ch) => n + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1), 0)
-const padCells = (text: string, width: number): string => {
-  let out = ''
-  for (const ch of text) {
-    if (cells(out + ch) > width) break
-    out += ch
-  }
-  return out + ' '.repeat(width - cells(out))
-}
 const commits = (graph: GraphLine[]) => graph.filter(line => line.hash !== undefined)
 
 const pad = (n: number): string => String(n).padStart(2, '0')
@@ -112,7 +101,7 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Markdown } = $.ui.resolve(e)
     const shown = await read($, scope)
     const mode = await read($, view)
     const snap = await read($, snapshot)
@@ -218,21 +207,9 @@ export const register: Register = (on, options) => {
         </Text>
         {snap.scope !== shown && <Text dimColor>切り替え中…</Text>}
         {snap.graph.length === 0 && <Text dimColor>コミットがまだありません。</Text>}
-        {mode === 'history' &&
-          commits(snap.graph).map(line => (
-            <Box flexDirection="row">
-              <Text color="warning" mono>
-                {line.hash}{' '}
-              </Text>
-              <Text dimColor mono>
-                {padCells(line.time === undefined ? '' : commitDate(line.time), 14)}
-              </Text>
-              <Text color="suggestion" mono>
-                {padCells(line.author ?? '', 12)}
-              </Text>
-              <Text wrap="truncate">{line.subject ?? ''}</Text>
-            </Box>
-          ))}
+        {mode === 'history' && commits(snap.graph).length > 0 && (
+          <Markdown key="history" text={historyTable(commits(snap.graph))} />
+        )}
         {mode === 'graph' && snap.graph.map(line => (
           <Box flexDirection="row">
             <Text color="suggestion" mono>

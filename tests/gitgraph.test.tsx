@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
-import { commitDate } from '../hooks/git'
+import { commitDate, historyTable } from '../hooks/git'
 
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
@@ -119,7 +119,7 @@ test('a git command Claude runs refreshes; others do not', async ($, on) => {
   expect(logs() - before).toBe(2)
 })
 
-test('Git History lists hash, date, author and message', async ($, on) => {
+test('Git History shows a table of hash, date, author and message', async ($, on) => {
   engine(on, [])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.command.run(GITGRAPH)
@@ -128,14 +128,19 @@ test('Git History lists hash, date, author and message', async ($, on) => {
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'view-history' })
-    expect(await ui.find({ type: 'Text', text: new RegExp(`^${date}`) })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Sora/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Add graph pane/ })).toBeDefined()
-    // Four columns only: no branch labels, no graph glyph rows.
-    expect(await ui.find({ type: 'Text', text: /HEAD -> main/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeUndefined()
+    const table = (await ui.find({ key: 'history' }))?.text ?? ''
+    expect(table).toContain('| ハッシュ | 日時 | 作成者 | メッセージ |')
+    expect(table).toContain(`| \`a1b2c3d\` | ${date} | Sora | Add graph pane |`)
+    // Four columns only: no branch labels.
+    expect(table).not.toContain('HEAD -> main')
     await ui.press({ key: 'view-graph' })
+    expect(await ui.find({ key: 'history' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^\|\/$/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('a pipe in a message stays inside its cell', () => {
+  const table = historyTable([{ graph: '* ', hash: 'abc1234', time: 0, author: 'A', subject: 'a | b' }])
+  expect(table).toContain('| a \\| b |')
 })

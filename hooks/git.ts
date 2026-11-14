@@ -1,4 +1,4 @@
-import type { Branch, GraphLine, Scope, Snapshot } from '../types'
+import type { Branch, GraphLine, GraphSegment, Scope, Snapshot } from '../types'
 
 export type Run = (
   argv: string[],
@@ -40,18 +40,52 @@ export const parseBranches = (stdout: string): Branch[] =>
       ...parseTrack(row.track),
     }))
 
-/** Parses `git log --graph` lines written with this module's format. */
+const ESC = /\x1b\[([0-9;]*)m/g
+
+/** Splits git's colored graph glyphs into runs of one color. */
+export const parseSegments = (colored: string): GraphSegment[] => {
+  const out: GraphSegment[] = []
+  let color: string | undefined
+  let at = 0
+  const push = (text: string) => {
+    if (text === '') return
+    const last = out[out.length - 1]
+    if (last !== undefined && last.color === color) last.text += text
+    else out.push(color === undefined ? { text } : { text, color })
+  }
+  for (const m of colored.matchAll(ESC)) {
+    push(colored.slice(at, m.index))
+    const code = m[1] ?? ''
+    color = code === '' || code === '0' ? undefined : code
+    at = m.index + m[0].length
+  }
+  push(colored.slice(at))
+  return out
+}
+
+const plain = (colored: string): string => colored.replace(ESC, '')
+
+/** Parses `git log --graph --color=always` lines written with this module's format. */
 export const parseGraph = (stdout: string): GraphLine[] =>
   stdout
     .split('\n')
     .filter(line => line.trim() !== '')
     .map(line => {
       if (!line.includes(SEP)) {
-        return { graph: line.trimEnd() }
+        const glyphs = line.trimEnd()
+        return { graph: plain(glyphs), segments: parseSegments(glyphs) }
       }
       const [graph = '', hash = '', time = '', author = '', refs = '', subject = ''] =
         line.split(SEP)
-      return { graph, hash, time: Number(time), author, refs, subject }
+      return {
+        graph: plain(graph),
+        segments: parseSegments(graph),
+        hash,
+        time: Number(time),
+        author,
+        refs,
+        subject,
+      }
     })
 
 /** The status line text: `⎇ main ↑2 ↓0`, or `⎇ main` with no upstream. */
@@ -105,7 +139,8 @@ export const collect = async (
     'log',
     '--graph',
     '--date-order',
-    '--color=never',
+    // Color only the graph glyphs: the format's fields carry no color.
+    '--color=always',
     `-n${COMMITS}`,
     `--format=${SEP}%h${SEP}%at${SEP}%an${SEP}%D${SEP}%s`,
     ...(scope === 'all' ? ['--branches', '--remotes'] : ['--branches']),

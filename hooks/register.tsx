@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, ThemeKey } from 'claude-code'
 
 import type { GraphLine, Scope, Snapshot, View } from '../types'
 import { COMMITS, collect, isGitCommand, commitDate, statusText } from './git'
@@ -15,7 +15,7 @@ const scope = atom({ plugin: 'claudecode-gitgraph-mods', key: 'scope' } as const
 const snapshot = atom(
   { plugin: 'claudecode-gitgraph-mods', key: 'snapshot' } as const,
   null as Snapshot | null,
-  { shape: 'snapshot-2' },
+  { shape: 'snapshot-3' },
 )
 const view = atom({ plugin: 'claudecode-gitgraph-mods', key: 'view' } as const, 'graph' as View, {
   shape: 'view-1',
@@ -39,6 +39,23 @@ const fit = (text: string, width: number): string => {
   if (width <= 1) return width === 1 ? '…' : ''
   return padCells(line, width - 1).trimEnd() + '…'
 }
+// git's lane colors (ANSI 31-36, bold or not) as theme colors, so they read
+// in light and dark themes alike.
+const LANE: Record<string, ThemeKey> = {
+  '31': 'error',
+  '32': 'success',
+  '33': 'warning',
+  '34': 'suggestion',
+  '35': 'merged',
+  '36': 'planMode',
+}
+const lane = (code: string | undefined): { color?: ThemeKey; bold?: boolean } => {
+  if (code === undefined) return {}
+  const parts = code.split(';')
+  const hue = parts.find(p => LANE[p] !== undefined)
+  return hue === undefined ? {} : { color: LANE[hue], bold: parts.includes('1') }
+}
+
 const commits = (graph: GraphLine[]) => graph.filter(line => line.hash !== undefined)
 
 const pad = (n: number): string => String(n).padStart(2, '0')
@@ -251,16 +268,18 @@ export const register: Register = (on, options) => {
           ))}
         {mode === 'graph' && snap.graph.map(line => (
           <Box flexDirection="row">
-            <Text color="suggestion" mono>
-              {line.graph}
-            </Text>
+            {line.segments.map(seg => (
+              <Text mono {...lane(seg.color)}>
+                {seg.text}
+              </Text>
+            ))}
             {line.hash !== undefined && (
-              <Text color="warning" mono>
+              <Text dimColor mono>
                 {line.hash}{' '}
               </Text>
             )}
             {line.refs !== undefined && line.refs !== '' && (
-              <Text color="success" bold>
+              <Text color="claude" bold>
                 ({line.refs}){' '}
               </Text>
             )}

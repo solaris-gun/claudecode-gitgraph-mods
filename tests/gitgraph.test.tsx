@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
-import { commitDate } from '../hooks/git'
+import { commitDate, parseSegments } from '../hooks/git'
 
 const S = '\x1f'
 const NOW = Date.UTC(2026, 10, 14, 0, 30)
@@ -18,8 +18,8 @@ const GIT: Record<string, string> = {
   ].join('\n'),
   log: [
     `* ${S}a1b2c3d${S}${NOW / 1000 - 2 * 3600}${S}Sora${S}HEAD -> main${S}Add graph pane`,
-    `| * ${S}e4f5a6b${S}${NOW / 1000 - 30 * 3600}${S}Sora${S}feature/x${S}Try feature`,
-    '|/',
+    `\x1b[31m|\x1b[m * ${S}e4f5a6b${S}${NOW / 1000 - 30 * 3600}${S}Sora${S}feature/x${S}Try feature`,
+    '\x1b[31m|\x1b[m\x1b[31m/\x1b[m',
     `* ${S}0c0ffee${S}${NOW / 1000 - 3 * 86400}${S}Sora${S}origin/main${S}Initial commit`,
   ].join('\n'),
 }
@@ -157,4 +157,27 @@ test('a long message is cut with … to fit the pane, never wrapped', async ($, 
     expect(await ui.find({ type: 'Text', text: 'Add graph pane' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('graph lines are colored per lane, as git colors them', async ($, on) => {
+  engine(on, [])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(GITGRAPH)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // git's red lane (31) is drawn in the theme's error color, escapes gone.
+    const glyphs = await ui.find({ type: 'Text', text: '|/' })
+    expect(glyphs?.props.color).toBe('error')
+    expect(await ui.find({ type: 'Text', text: /\x1b/ })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('parseSegments splits colored glyphs into runs', () => {
+  expect(parseSegments('\x1b[31m|\x1b[m \x1b[1;32m\\\x1b[m')).toEqual([
+    { text: '|', color: '31' },
+    { text: ' ' },
+    { text: '\\', color: '1;32' },
+  ])
 })
